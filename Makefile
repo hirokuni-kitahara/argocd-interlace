@@ -1,7 +1,7 @@
 NAME=gcr.io/signing-demo-project/argocd-interlace-controller
 VERSION=dev5
 
-.PHONY: build build-cli build-core
+.PHONY: build build-cli build-core, deploy, delete
 
 build-linux:
 	@echo building binary for image
@@ -27,3 +27,11 @@ build-core-linux:
 build-core:
 	@echo building binary for core
 	CGO_ENABLED=0 GOARCH=amd64 GO111MODULE=on go build -ldflags="-s -w" -a -o build/_bin/argocd-interlace ./cmd/core
+
+deploy-argocd-interlace:
+	@echo deploying argocd-interlace
+	kustomize build deploy | kubectl apply -f -
+
+delete-argocd-interlace:
+	@echo deleting argocd-interlace
+	kustomize build deploy | kubectl delete -f -
