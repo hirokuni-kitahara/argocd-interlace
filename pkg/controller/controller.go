@@ -112,7 +112,7 @@ func newController(applicationClientset appClientset.Interface, namespace string
 			newApp, newOK := new.(*appv1.Application)
 			if oldOK && newOK {
 				appName := newApp.ObjectMeta.Name
-				rolePath := newApp.Status.Sync.ComparedTo.Source.Path
+				appPath := newApp.Status.Sync.ComparedTo.Source.Path
 				//logrus.Infof("oldApp.Status.OperationState.Phase ", oldApp.Status.OperationState)
 				//logrus.Infof("newApp %s ", newApp)
 
@@ -168,9 +168,9 @@ func newController(applicationClientset appClientset.Interface, namespace string
 						targetState := gjson.Get(item.String(), "targetState").String()
 						liveState := gjson.Get(item.String(), "liveState").String()
 
-						kind := gjson.Get(targetState, "kind").String()
-						name := gjson.Get(targetState, "metadata.name").String()
 						if ctrl.debug {
+							kind := gjson.Get(targetState, "kind").String()
+							name := gjson.Get(targetState, "metadata.name").String()
 							if kind == "Deployment" && name == "akme-account-command" {
 								targetImage := gjson.Get(targetState, "spec.template.spec.containers.0.image").String()
 								liveImage := gjson.Get(liveState, "spec.template.spec.containers.0.image").String()
@@ -212,6 +212,9 @@ func newController(applicationClientset appClientset.Interface, namespace string
 
 					if diffCount > 0 {
 						fmt.Println("---------Event Recieved---------")
+						loc, _ := time.LoadLocation("UTC")
+						buildStartedOn := time.Now().In(loc)
+
 						fmt.Println()
 						fmt.Println("------------------ Source Git Repo  --------------")
 						/*
@@ -233,19 +236,28 @@ func newController(applicationClientset appClientset.Interface, namespace string
 						fmt.Println("------------------ Desired State Manifest --------------")
 						fmt.Println()
 						//fmt.Println(finalManifest)
-						dirPath := filepath.Join("/tmp/output", appName, rolePath)
+						dirPath := filepath.Join("/tmp/output", appName, appPath)
 						if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 							os.MkdirAll(dirPath, os.ModePerm)
 						}
 						fmt.Println(finalManifest)
 						outfilepath := filepath.Join(dirPath, "manifest.yaml")
-						writeToFile(string(finalManifest), outfilepath)
+
+						utils.WriteToFile(string(finalManifest), outfilepath)
 
 						imageRef := "gcr.io/kg-image-registry/akeme-signed-dev:1.0.0"
 
 						//imageRef := "gcr.io/hk-image-registry/akeme-signed-dev:1.0.0"
 
 						signManifest(outfilepath, imageRef, KEY_PATH)
+
+						buildFinishedOn := time.Now().In(loc)
+
+						appSourceRepoUrl := newApp.Status.Sync.ComparedTo.Source.RepoURL
+						appSourceRevision := newApp.Status.Sync.ComparedTo.Source.TargetRevision
+						appSourceCommitSha := newApp.Status.Sync.Revision
+						GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, KEY_PATH, buildStartedOn, buildFinishedOn)
+
 						//fmt.Println("Error ", err)
 						fmt.Println("--------------------------------------------------")
 						fmt.Println("--------- Completed Processing Event---------")
@@ -286,22 +298,6 @@ func newController(applicationClientset appClientset.Interface, namespace string
 
 	ctrl.informer = appInformer
 	return ctrl
-}
-
-func writeToFile(str string, filename string) {
-
-	f, err := os.Create(filename)
-	if err != nil {
-
-		fmt.Println("Error opening ", filename)
-	}
-
-	defer f.Close()
-	_, err = f.WriteString(str)
-	if err != nil {
-		fmt.Println("Error writing ", filename)
-	}
-
 }
 
 var maskKeys = []string{

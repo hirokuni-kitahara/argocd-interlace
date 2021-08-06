@@ -1,6 +1,9 @@
 package utils
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -32,4 +35,20 @@ func GetClient(configpath string, debug bool) (*kubernetes.Clientset, *rest.Conf
 	}
 	clientset, _ := kubernetes.NewForConfig(config)
 	return clientset, config, nil
+}
+
+func WriteToFile(str string, filename string) {
+
+	f, err := os.Create(filename)
+	if err != nil {
+
+		fmt.Println("Error opening ", filename)
+	}
+
+	defer f.Close()
+	_, err = f.WriteString(str)
+	if err != nil {
+		fmt.Println("Error writing ", filename)
+	}
+
 }

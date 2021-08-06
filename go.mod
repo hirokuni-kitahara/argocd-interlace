@@ -6,10 +6,14 @@ require (
 	github.com/argoproj/argo-cd/v2 v2.0.5
 	github.com/go-redis/redis/v8 v8.11.1 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
+	github.com/in-toto/in-toto-golang v0.2.1-0.20210627200632-886210ae2ab9
+	github.com/sigstore/cosign v1.0.1
 	github.com/sigstore/k8s-manifest-sigstore v0.0.0-20210802132923-67f63f79ca88
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/cobra v1.2.1
+	github.com/theupdateframework/go-tuf v0.0.0-20210722233521-90e262754396
 	github.com/tidwall/gjson v1.8.1
+	golang.org/x/term v0.0.0-20210615171337-6886f2dfbf5b
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/apimachinery v0.21.3
 	k8s.io/apiserver v0.21.3 // indirect
