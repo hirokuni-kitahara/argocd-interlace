@@ -1,5 +1,5 @@
-NAME=gcr.io/signing-demo-project/argocd-interlace-controller
-VERSION=dev5
+NAME=gcr.io/kg-image-registry/argocd-interlace-controller
+VERSION=dev11
 
 .PHONY: build build-cli build-core, deploy, delete
 
@@ -31,6 +31,8 @@ build-core:
 deploy-argocd-interlace:
 	@echo deploying argocd-interlace
 	kustomize build deploy | kubectl apply -f -
+	#kubectl create secret docker-registry argocd-interlace-gcr-secret --docker-server="https://gcr.io"  --docker-username=_json_key  --docker-email="kgajananan2021@gmail.com"  --docker-password="`cat ~/Downloads/kg-image-registry-078a8a2d04ca.json | jq -c .`"  -n argocd-interlace
+	#kubectl apply -f secret.yaml -n argocd-interlace
 
 delete-argocd-interlace:
 	@echo deleting argocd-interlace

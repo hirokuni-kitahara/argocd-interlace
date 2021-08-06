@@ -16,23 +16,40 @@ spec:
       serviceAccountName: argocd-interlace-controller
       containers:
         - name: argocd-interlace-controller
-          image: gcr.io/signing-demo-project/argocd-interlace-controller:dev5
+          image: gcr.io/kg-image-registry/argocd-interlace-controller:dev11
           imagePullPolicy: Always
           command:
             - argocd-interlace
           args:
             - --namespace=argocd  
           env:
+            - name: COSIGN_PASSWORD
+              value: ""
+            - name: DOCKER_CONFIG
+              value: /tmp/.docker/
+            - name: K8S_MANIFEST_SIGSTORE_LOG_LEVEL
+              value: debug
             - name: ARGOCD_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: argocd-token-secret
                   key: ARGOCD_TOKEN            
-          #volumeMounts:
-          #  - name: signing-secrets
-          #    mountPath: /etc/signing-secrets
-
-      #volumes:
-       # - name: signing-secrets
-        #  secret:
-         #   secretName: signing-secrets
+          volumeMounts:
+            - name: output
+              mountPath: /tmp/output
+            - name: signing-secrets
+              mountPath: /etc/signing-secrets
+            - name: gcr-registry-docker-config
+              mountPath: /tmp/.docker/
+      volumes:
+      - name: signing-secrets
+        secret:
+            secretName: signing-secrets
+      - name: output
+        emptyDir: {}
+      - name: gcr-registry-docker-config
+        secret:
+          secretName: argocd-interlace-gcr-secret
+          items:
+            - key: .dockerconfigjson
+              path: config.json
