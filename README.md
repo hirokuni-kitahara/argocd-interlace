@@ -1,9 +1,5 @@
-# argocd-interlace
-Supply Chain Security in ArgoCD
-
-
-
 # ArgoCD Interlace
+
 
 ArgoCD is widely used for enabling CD GitOps. ArgoCD internally builds manifest from source data in Git repository, and auto-sync it with target clusters. 
 
@@ -13,6 +9,7 @@ ArgoCD Interlace works as a Kubernetes Custom Resource Definition (CRD) controll
 
 ![ArgoCD-Interlace-Arch](./images/argocd-interlace-arch.png)
 
+## Supply Chain Security in ArgoCD
 
 The features are 
 - Pluggable to ArgoCD
