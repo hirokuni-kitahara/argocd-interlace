@@ -14,11 +14,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/IBM/integrity-enforcer/enforcer/pkg/mapnode"
 	appv1 "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appClientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/gajananan/argocd-interlace/pkg/utils"
 	"github.com/sigstore/k8s-manifest-sigstore/pkg/k8smanifest"
-	mapnode "github.com/sigstore/k8s-manifest-sigstore/pkg/util/mapnode"
+	k8smnfutil "github.com/sigstore/k8s-manifest-sigstore/pkg/util"
 	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"gopkg.in/yaml.v2"
@@ -41,8 +42,7 @@ type controller struct {
 }
 
 const (
-	ARGOCD_API_BASE_URL = "https://argo-route-argocd.apps.ma4kmc2.openshiftv4test.com/api/v1/applications/"
-	KEY_PATH            = "/etc/signing-secrets/cosign.key"
+	KEY_PATH = "/etc/signing-secrets/cosign.key"
 )
 
 func Start(ctx context.Context, config string, namespace string, debug bool) {
@@ -83,7 +83,7 @@ func newController(applicationClientset appClientset.Interface, namespace string
 		namespace:            namespace,
 		debug:                debug,
 	}
-
+	imageRef := "gcr.io/kg-image-registry/akeme-signed-dev:1.0.0"
 	appInformer := ctrl.newApplicationInformer(applicationClientset)
 	appInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -91,10 +91,55 @@ func newController(applicationClientset appClientset.Interface, namespace string
 				return
 			}
 			key, err := cache.MetaNamespaceKeyFunc(obj)
-			if err == nil {
+
+			app, ok := obj.(*appv1.Application)
+			if ok {
+				appName := app.ObjectMeta.Name
+				appPath := app.Status.Sync.ComparedTo.Source.Path
+
+				desiredManifest := retriveApplicationResources(appName)
+
+				items := gjson.Get(desiredManifest, "items")
+
+				finalManifest := ""
+
 				if ctrl.debug {
-					logrus.Infof("Event received of type create for key [%s] ", key)
+					fmt.Println("len(items.Array()) ", len(items.Array()))
 				}
+
+				for i, item := range items.Array() {
+
+					targetState := gjson.Get(item.String(), "targetState").String()
+
+					finalManifest = prepareFinalManifest(targetState, finalManifest, i, len(items.Array())-1)
+				}
+
+				fmt.Println("---------Event Recieved---------")
+				loc, _ := time.LoadLocation("UTC")
+				buildStartedOn := time.Now().In(loc)
+
+				fmt.Println()
+				fmt.Println("------------------ Source Git Repo  --------------")
+
+				fmt.Println("url: ", app.Status.Sync.ComparedTo.Source.RepoURL)
+				fmt.Println("path: ", app.Status.Sync.ComparedTo.Source.Path)
+				fmt.Println("targetRevision: ", app.Status.Sync.ComparedTo.Source.TargetRevision)
+				fmt.Println("commit id: ", app.Status.Sync.Revision)
+
+				appSourceRepoUrl := app.Status.Sync.ComparedTo.Source.RepoURL
+				appSourceRevision := app.Status.Sync.ComparedTo.Source.TargetRevision
+				appSourceCommitSha := app.Status.Sync.Revision
+
+				signAndGenerateProv(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
+					finalManifest, imageRef, buildStartedOn)
+				fmt.Println("--------------------------------------------------")
+				fmt.Println("--------- Completed Processing Event---------")
+			}
+
+			if err == nil {
+				//if ctrl.debug {
+				//	logrus.Infof("Event received of type create for key [%s] ", key)
+				//}
 				ctrl.appRefreshQueue.Add(key)
 				if ctrl.debug {
 					logrus.Infof("Event queue size: %v", ctrl.appRefreshQueue.Len())
@@ -113,19 +158,13 @@ func newController(applicationClientset appClientset.Interface, namespace string
 			if oldOK && newOK {
 				appName := newApp.ObjectMeta.Name
 				appPath := newApp.Status.Sync.ComparedTo.Source.Path
-				//logrus.Infof("oldApp.Status.OperationState.Phase ", oldApp.Status.OperationState)
-				//logrus.Infof("newApp %s ", newApp)
 
-				//logrus.Infof("newApp.Status %s ", newApp.Status)
-
-				//logrus.Infof("newApp.Status.OperationState %s ", newApp.Status.OperationState)
-
-				if ctrl.debug {
+				/*if ctrl.debug {
 
 					logrus.Infof("oldApp.Status ", oldApp.Status)
 					logrus.Infof("-------------------------")
 					logrus.Infof("newApp.Status ", newApp.Status)
-				}
+				}*/
 
 				if ctrl.debug {
 					fmt.Println(fmt.Sprintf("oldApp.Status.Health.Status %s ", oldApp.Status.Health.Status))
@@ -150,66 +189,57 @@ func newController(applicationClientset appClientset.Interface, namespace string
 
 				if oldApp.Status.OperationState != nil &&
 					oldApp.Status.OperationState.Phase == "Running" &&
-					oldApp.Status.Sync.Status == "Synced" && //"OutOfSync" && //"Synced" &&
+					oldApp.Status.Sync.Status == "Synced" && //"Synced" &&
 					newApp.Status.OperationState != nil &&
 					newApp.Status.OperationState.Phase == "Running" &&
 					newApp.Status.Sync.Status == "OutOfSync" {
 
-					desiredRscUrl := fmt.Sprintf("%s/%s/managed-resources", ARGOCD_API_BASE_URL, appName)
-
-					desiredManifest := queryAPI(desiredRscUrl, nil)
+					desiredManifest := retriveApplicationResources(appName)
 
 					items := gjson.Get(desiredManifest, "items")
+
 					finalManifest := ""
-					//fmt.Println("len(items.Array()) ", len(items.Array()))
-					diffCount := 0
-					for i, item := range items.Array() {
-
-						targetState := gjson.Get(item.String(), "targetState").String()
-						liveState := gjson.Get(item.String(), "liveState").String()
-
-						if ctrl.debug {
-							kind := gjson.Get(targetState, "kind").String()
-							name := gjson.Get(targetState, "metadata.name").String()
-							if kind == "Deployment" && name == "akme-account-command" {
-								targetImage := gjson.Get(targetState, "spec.template.spec.containers.0.image").String()
-								liveImage := gjson.Get(liveState, "spec.template.spec.containers.0.image").String()
-								fmt.Println(fmt.Sprintf("targetState image %s", targetImage))
-								fmt.Println(fmt.Sprintf("liveState image: %s", liveImage))
-
-								targetManifestNode, err := mapnode.NewFromYamlBytes([]byte(targetState))
-								liveManifestNode, err := mapnode.NewFromYamlBytes([]byte(liveState))
-								liveManifestNodeMaked := liveManifestNode.Mask(maskKeys)
-
-								if err != nil {
-									fmt.Println("Compare error")
-								}
-								diff := targetManifestNode.Diff(liveManifestNodeMaked)
-								fmt.Println("diff:", diff)
-
-							}
-						}
-						diffExist := checkDiff(targetState, liveState)
-						if diffExist {
-							diffCount += 1
-						}
-						var obj *unstructured.Unstructured
-						err := json.Unmarshal([]byte(targetState), &obj)
-						if err != nil {
-						}
-						objBytes, _ := yaml.Marshal(obj)
-						endLine := ""
-						if !strings.HasSuffix(string(objBytes), "\n") {
-							endLine = "\n"
-						}
-						finalManifest = fmt.Sprintf("%s%s%s", finalManifest, string(objBytes), endLine)
-						finalManifest = strings.ReplaceAll(finalManifest, "object:\n", "")
-						if i < len(items.Array())-1 {
-							finalManifest = fmt.Sprintf("%s---\n", finalManifest)
-						}
-
+					if ctrl.debug {
+						fmt.Println("len(items.Array()) ", len(items.Array()))
 					}
 
+					diffCount := 0
+
+					bundleYAMLBytes, err := getBundleManifest(imageRef)
+
+					manifestYAMLs := k8smnfutil.SplitConcatYAMLs(bundleYAMLBytes)
+
+					// if manifest not found, create it without check if diff exist
+					if err != nil {
+						diffCount += 1
+					}
+
+					if diffCount == 0 {
+						for i, item := range items.Array() {
+
+							targetState := gjson.Get(item.String(), "targetState").String()
+							liveState := gjson.Get(item.String(), "liveState").String()
+
+							if ctrl.debug {
+								kind := gjson.Get(targetState, "kind").String()
+								name := gjson.Get(targetState, "metadata.name").String()
+								if kind == "Deployment" && name == "akme-account-command" {
+									targetImage := gjson.Get(targetState, "spec.template.spec.containers.0.image").String()
+									liveImage := gjson.Get(liveState, "spec.template.spec.containers.0.image").String()
+									fmt.Println(fmt.Sprintf("targetState image %s", targetImage))
+									fmt.Println(fmt.Sprintf("liveState image: %s", liveImage))
+
+								}
+							}
+
+							diffExist := checkDiffWithBundle([]byte(targetState), manifestYAMLs)
+							if diffExist {
+								diffCount += 1
+							}
+
+							finalManifest = prepareFinalManifest(targetState, finalManifest, i, len(items.Array())-1)
+						}
+					}
 					if diffCount > 0 {
 						fmt.Println("---------Event Recieved---------")
 						loc, _ := time.LoadLocation("UTC")
@@ -231,34 +261,12 @@ func newController(applicationClientset appClientset.Interface, namespace string
 						fmt.Println("targetRevision: ", newApp.Status.Sync.ComparedTo.Source.TargetRevision)
 						fmt.Println("commit id: ", newApp.Status.Sync.Revision)
 
-						fmt.Println()
-						fmt.Println()
-						fmt.Println("------------------ Desired State Manifest --------------")
-						fmt.Println()
-						//fmt.Println(finalManifest)
-						dirPath := filepath.Join("/tmp/output", appName, appPath)
-						if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-							os.MkdirAll(dirPath, os.ModePerm)
-						}
-						fmt.Println(finalManifest)
-						outfilepath := filepath.Join(dirPath, "manifest.yaml")
-
-						utils.WriteToFile(string(finalManifest), outfilepath)
-
-						imageRef := "gcr.io/kg-image-registry/akeme-signed-dev:1.0.0"
-
-						//imageRef := "gcr.io/hk-image-registry/akeme-signed-dev:1.0.0"
-
-						signManifest(outfilepath, imageRef, KEY_PATH)
-
-						buildFinishedOn := time.Now().In(loc)
-
 						appSourceRepoUrl := newApp.Status.Sync.ComparedTo.Source.RepoURL
 						appSourceRevision := newApp.Status.Sync.ComparedTo.Source.TargetRevision
 						appSourceCommitSha := newApp.Status.Sync.Revision
-						GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, KEY_PATH, buildStartedOn, buildFinishedOn)
 
-						//fmt.Println("Error ", err)
+						signAndGenerateProv(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
+							finalManifest, imageRef, buildStartedOn)
 						fmt.Println("--------------------------------------------------")
 						fmt.Println("--------- Completed Processing Event---------")
 					}
@@ -300,52 +308,108 @@ func newController(applicationClientset appClientset.Interface, namespace string
 	return ctrl
 }
 
-var maskKeys = []string{
-	"metadata.annotations.\"deployment.kubernetes.io/revision\"",
-	"metadata.annotations.\"kubectl.kubernetes.io/last-applied-configuration\"",
-	"metadata.managedFields",
-	"metadata.generation",
-	"metadata.creationTimestamp",
-	"metadata.resourceVersion",
-	"metadata.selfLink",
-	"metadata.uid",
-	"spec.progressDeadlineSeconds",
-	"spec.strategy.rollingUpdate.maxSurge",
-	"spec.strategy.rollingUpdate.maxUnavailable",
-	"spec.strategy.type",
-	"spec.template.spec.schedulerName",
-	"spec.template.spec.containers.0.terminationMessagePath",
-	"spec.template.spec.containers.0.terminationMessagePolicy",
-	"spec.template.spec.dnsPolicy",
-	"spec.template.spec.restartPolicy",
-	"spec.template.spec.terminationGracePeriodSeconds",
-	"spec.template.spec.volumes.0.secret.defaultMode",
-	"status",
-	"spec.clusterIP",
-	"spec.clusterIPs",
-	"spec.sessionAffinity",
-	"spec.host",
-	"spec.type",
+func prepareFinalManifest(targetState, finalManifest string, counter int, numberOfitem int) string {
+	var obj *unstructured.Unstructured
+	err := json.Unmarshal([]byte(targetState), &obj)
+	if err != nil {
+	}
+	objBytes, _ := yaml.Marshal(obj)
+	endLine := ""
+	if !strings.HasSuffix(string(objBytes), "\n") {
+		endLine = "\n"
+	}
+	finalManifest = fmt.Sprintf("%s%s%s", finalManifest, string(objBytes), endLine)
+	finalManifest = strings.ReplaceAll(finalManifest, "object:\n", "")
+	if counter < numberOfitem {
+		finalManifest = fmt.Sprintf("%s---\n", finalManifest)
+	}
+	return finalManifest
 }
 
-func checkDiff(targetState, liveState string) bool {
+func retriveApplicationResources(appName string) string {
 
-	targetManifestNode, err := mapnode.NewFromYamlBytes([]byte(targetState))
-	liveManifestNode, err := mapnode.NewFromYamlBytes([]byte(liveState))
-	liveManifestNodeMaked := liveManifestNode.Mask(maskKeys)
+	baseUrl := os.Getenv("ARGOCD_API_BASE_URL")
+
+	desiredRscUrl := fmt.Sprintf("%s/%s/managed-resources", baseUrl, appName)
+
+	desiredManifest := queryAPI(desiredRscUrl, nil)
+
+	return desiredManifest
+}
+func signAndGenerateProv(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
+	finalManifest, imageRef string, buildStartedOn time.Time) {
+
+	fmt.Println()
+	fmt.Println()
+	fmt.Println("------------------ Desired State Manifest --------------")
+	fmt.Println()
+
+	dirPath := filepath.Join("/tmp/output", appName, appPath)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		os.MkdirAll(dirPath, os.ModePerm)
+	}
+	fmt.Println(finalManifest)
+	outfilepath := filepath.Join(dirPath, "manifest.yaml")
+
+	utils.WriteToFile(string(finalManifest), outfilepath)
+
+	signManifest(outfilepath, imageRef, KEY_PATH)
+
+	loc, _ := time.LoadLocation("UTC")
+	buildFinishedOn := time.Now().In(loc)
+
+	GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, KEY_PATH, buildStartedOn, buildFinishedOn)
+
+}
+
+func checkDiffWithBundle(targetObjYAMLBytes []byte, manifestYAMLs [][]byte) bool {
+
+	//fmt.Println("Call NewFromBytes")
+	objNode, err := mapnode.NewFromBytes(targetObjYAMLBytes) // json
+	//fmt.Println("targetObjYAMLBytes ", string(targetObjYAMLBytes))
+	if err != nil {
+		fmt.Println("objNode error from NewFromYamlBytes ", err)
+		// do somthing
+	}
+	found := false
+	for _, manifest := range manifestYAMLs {
+		fmt.Println("manifest ", string(manifest))
+		mnfNode, err := mapnode.NewFromYamlBytes(manifest)
+		if err != nil {
+			fmt.Println("mnfNode error from NewFromYamlBytes ", err)
+			// do somthing
+		}
+		diffs := objNode.Diff(mnfNode)
+		if diffs == nil {
+			fmt.Println(" diffs == nil ")
+		}
+		if diffs == nil || diffs.Size() == 0 {
+			found = true
+			break
+		}
+	}
+	return found
+
+}
+
+func getBundleManifest(imageRef string) ([]byte, error) {
+
+	image, err := k8smnfutil.PullImage(imageRef)
 
 	if err != nil {
-		fmt.Println("Compare error")
+		fmt.Println("Error in pulling image err ", err)
+		return nil, err
 	}
-
-	diff := targetManifestNode.Diff(liveManifestNodeMaked)
-	//fmt.Println("diff:", diff)
-
-	if diff != nil {
-		return true
+	//imageManifest, _ := image.RawManifest()
+	//fmt.Println("imageManifest ", string(imageManifest))
+	concatYAMLbytes, err := k8smnfutil.GenerateConcatYAMLsFromImage(image)
+	if err != nil {
+		fmt.Println("Error in GenerateConcatYAMLsFromImage err ", err)
+		return nil, err
 	}
-	return false
+	return concatYAMLbytes, nil
 }
+
 func signManifest(inputDir, imageRef, keyPath string) error {
 	so := &k8smanifest.SignOption{
 		ImageRef:         imageRef,
@@ -473,8 +537,8 @@ func (c *controller) processItem(key string) error {
 		return nil
 	}
 	//Use a switch clause instead and process the events based on the type
-	if c.debug {
+	/*if c.debug {
 		logrus.Infof("argocd- has processed 1 event for object [%s]", obj)
-	}
+	}*/
 	return nil
 }

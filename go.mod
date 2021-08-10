@@ -3,6 +3,7 @@ module github.com/gajananan/argocd-interlace
 go 1.16
 
 require (
+	github.com/IBM/integrity-enforcer/enforcer v0.0.0-20201001024601-320551d946dc
 	github.com/argoproj/argo-cd/v2 v2.0.5
 	github.com/go-redis/redis/v8 v8.11.1 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
@@ -76,3 +77,9 @@ replace k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.21.2
 replace k8s.io/sample-cli-plugin => k8s.io/sample-cli-plugin v0.21.2
 
 replace k8s.io/sample-controller => k8s.io/sample-controller v0.21.2
+
+replace (
+	github.com/docker/distribution => github.com/distribution/distribution v2.7.1+incompatible
+	github.com/docker/docker => github.com/moby/moby v0.7.3-0.20190826074503-38ab9da00309
+
+)

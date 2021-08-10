@@ -136,26 +136,16 @@ func getDigestFromFile(fpath string) string {
 
 func generateSignedAttestation(it in_toto.Statement, privKeyPath string, attestationPath string) {
 
-	/*so := SignOpts{
-		Pf: GetPass,
-	}*/
-
 	b, err := json.Marshal(it)
 	if err != nil {
 		fmt.Println("Error in marshaling it")
 	}
 
 	ecdsaPriv, _ := ioutil.ReadFile(filepath.Clean(privKeyPath))
-	//fmt.Println("ecdsaPriv ======> ", string(ecdsaPriv))
-	//fmt.Println("ecdsaPriv: ", string(ecdsaPriv))
 
 	pb, _ := pem.Decode(ecdsaPriv)
 
 	pwd := "" //os.Getenv(cosignPwd) //GetPass(true)
-
-	//fmt.Println("pb.Bytes", string(pb.Bytes))
-
-	//fmt.Println("[]byte(pwd)", string([]byte(pwd)))
 
 	x509Encoded, err := encrypted.Decrypt(pb.Bytes, []byte(pwd))
 
