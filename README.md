@@ -9,7 +9,6 @@ ArgoCD Interlace works as a Kubernetes Custom Resource Definition (CRD) controll
 
 ![ArgoCD-Interlace-Arch](./images/argocd-interlace-arch.png)
 
-## Supply Chain Security in ArgoCD
 
 The features are 
 - Pluggable to ArgoCD
