@@ -22,6 +22,8 @@ RUN chgrp -R 0 /ishield-app && chmod -R g=u /ishield-app
 
 COPY build/_bin/argocd-interlace /usr/local/bin/argocd-interlace
 
+COPY rekor/rekor-cli /usr/local/bin/rekor-cli
+
 WORKDIR /ishield-app
 
 ENTRYPOINT ["argocd-interlace"]

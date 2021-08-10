@@ -1,11 +1,17 @@
 NAME=gcr.io/kg-image-registry/argocd-interlace-controller
-VERSION=dev25
+VERSION=dev32
 
 .PHONY: build build-cli build-core, deploy, delete
 
 build-linux:
 	@echo building binary for image
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -ldflags="-s -w" -a -o build/_bin/argocd-interlace ./cmd/core
+	@echo building image
+	docker build -t $(NAME):$(VERSION) .
+	docker push $(NAME):$(VERSION)
+	yq w -i  deploy/deployment.yaml 'spec.template.spec.containers.(name==argocd-interlace-controller).image' $(NAME):$(VERSION)
+
+build-image:
 	@echo building image
 	docker build -t $(NAME):$(VERSION) .
 	docker push $(NAME):$(VERSION)

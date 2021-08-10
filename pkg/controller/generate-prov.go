@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gajananan/argocd-interlace/pkg/utils"
+	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/in-toto/in-toto-golang/in_toto"
 	"github.com/in-toto/in-toto-golang/pkg/ssl"
 	"github.com/sigstore/cosign/pkg/cosign"
@@ -45,15 +46,18 @@ var (
 	Read = readPasswordFn
 )
 
-func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, privKeyPath string, buildStartedOn, buildFinishedOn time.Time) {
+func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, privKeyPath, pubKeyPath, imageRef string, buildStartedOn, buildFinishedOn time.Time) {
 
 	subjects := []in_toto.Subject{}
-	productName := appName
-	productPath := filepath.Join("/tmp/output", appName, appPath, "manifest.yaml")
+	productName := imageRef
+	//productPath := filepath.Join("/tmp/output", appName, appPath, "manifest.yaml")
 
+	digest, _ := getDigest(productName)
+	digest = strings.ReplaceAll(digest, "sha256:", "")
+	fmt.Println("digest ", digest)
 	subjects = append(subjects, in_toto.Subject{Name: productName,
 		Digest: in_toto.DigestSet{
-			"sha256": getDigestFromFile(productPath),
+			"sha256": digest, //getDigestFromFile(productPath),
 		},
 	})
 
@@ -98,8 +102,17 @@ func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, a
 
 	attestationPath := filepath.Join(dirPath, "attestation.json")
 
-	generateSignedAttestation(it, privKeyPath, attestationPath)
+	generateSignedAttestation(it, privKeyPath, pubKeyPath, attestationPath)
 
+}
+
+func getDigest(src string) (string, error) {
+
+	digest, err := crane.Digest(src)
+	if err != nil {
+		return "", fmt.Errorf("fetching digest %s: %v", src, err)
+	}
+	return digest, nil
 }
 
 func generateMaterial(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha string) []in_toto.ProvenanceMaterial {
@@ -134,7 +147,7 @@ func getDigestFromFile(fpath string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func generateSignedAttestation(it in_toto.Statement, privKeyPath string, attestationPath string) {
+func generateSignedAttestation(it in_toto.Statement, privKeyPath string, pubKeyPath string, attestationPath string) {
 
 	b, err := json.Marshal(it)
 	if err != nil {
@@ -186,7 +199,10 @@ func generateSignedAttestation(it in_toto.Statement, privKeyPath string, attesta
 
 	bytes, err := f.Write(eb)
 
+	fmt.Println("attestation.json", string(eb))
 	fmt.Printf(fmt.Sprintf("Generated attestation.json, wrote %d bytes\n", bytes))
+
+	upload(it, attestationPath, pubKeyPath)
 
 }
 
@@ -254,7 +270,9 @@ func (it *IntotoSigner) Verify(_ string, data, sig []byte) error {
 func upload(it in_toto.Statement, attestationPath string, pubKeyPath string) {
 
 	// If we do it twice, it should already exist
-	out := runCli("upload", "--artifact", attestationPath, "--type", "intoto", "--public-key", pubKeyPath)
+	out := runCli("upload", "--artifact", attestationPath, "--type", "intoto", "--public-key", pubKeyPath, "--pki-format", "x509")
+
+	fmt.Println("out ", out)
 
 	outputContains(out, "Created entry at")
 

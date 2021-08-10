@@ -42,7 +42,8 @@ type controller struct {
 }
 
 const (
-	KEY_PATH = "/etc/signing-secrets/cosign.key"
+	KEY_PATH     = "/etc/signing-secrets/cosign.key"
+	PUB_KEY_PATH = "/etc/signing-secrets/cosign.pub"
 )
 
 func Start(ctx context.Context, config string, namespace string, debug bool) {
@@ -358,7 +359,7 @@ func signAndGenerateProv(appName, appPath, appSourceRepoUrl, appSourceRevision, 
 	loc, _ := time.LoadLocation("UTC")
 	buildFinishedOn := time.Now().In(loc)
 
-	GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, KEY_PATH, buildStartedOn, buildFinishedOn)
+	GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, KEY_PATH, PUB_KEY_PATH, imageRef, buildStartedOn, buildFinishedOn)
 
 }
 

@@ -6,6 +6,7 @@ require (
 	github.com/IBM/integrity-enforcer/enforcer v0.0.0-20201001024601-320551d946dc
 	github.com/argoproj/argo-cd/v2 v2.0.5
 	github.com/go-redis/redis/v8 v8.11.1 // indirect
+	github.com/google/go-containerregistry v0.5.1
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/in-toto/in-toto-golang v0.2.1-0.20210627200632-886210ae2ab9
 	github.com/sigstore/cosign v1.0.1
