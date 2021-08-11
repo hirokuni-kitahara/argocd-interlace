@@ -1,6 +1,12 @@
 package utils
 
 import (
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -47,4 +53,35 @@ func WriteToFile(str string, filename string) {
 		log.Fatalf("Error occured while writing to file %s :%v", filename, err)
 	}
 
+}
+
+func QueryAPI(url string, data map[string]string) string {
+
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	token := os.Getenv("ARGOCD_TOKEN")
+	var bearer = fmt.Sprintf("Bearer %s", token)
+	var dataJson []byte
+	if data != nil {
+		dataJson, _ = json.Marshal(data)
+	} else {
+		dataJson = nil
+	}
+	req, err := http.NewRequest("GET", url, bytes.NewBuffer(dataJson))
+	if err != nil {
+		log.Info("Error %s ", err)
+	}
+
+	req.Header.Add("Authorization", bearer)
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Info("Error %s ", err)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Info("Error %s ", err)
+	}
+
+	return string([]byte(body))
 }
