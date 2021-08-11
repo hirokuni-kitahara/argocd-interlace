@@ -272,7 +272,7 @@ func upload(it in_toto.Statement, attestationPath string, pubKeyPath string) {
 	// If we do it twice, it should already exist
 	out := runCli("upload", "--artifact", attestationPath, "--type", "intoto", "--public-key", pubKeyPath, "--pki-format", "x509")
 
-	fmt.Println("out ", out)
+	//fmt.Println("out ", out)
 
 	outputContains(out, "Created entry at")
 

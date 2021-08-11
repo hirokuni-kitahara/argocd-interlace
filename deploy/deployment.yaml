@@ -16,7 +16,7 @@ spec:
       serviceAccountName: argocd-interlace-controller
       containers:
         - name: argocd-interlace-controller
-          image: gcr.io/kg-image-registry/argocd-interlace-controller:dev32
+          image: gcr.io/kg-image-registry/argocd-interlace-controller:dev40
           imagePullPolicy: Always
           command:
             - argocd-interlace
@@ -27,8 +27,12 @@ spec:
               value: ""
             - name: DOCKER_CONFIG
               value: /tmp/.docker/
+            - name: IMAGE_REGISTRY
+              value: gcr.io/kg-image-registry
             - name: K8S_MANIFEST_SIGSTORE_LOG_LEVEL
               value: debug
+            - name: ARGOCD_INTERLACE_LOG_LEVEL
+              value: info
             - name: ARGOCD_API_BASE_URL
               valueFrom:
                 secretKeyRef:

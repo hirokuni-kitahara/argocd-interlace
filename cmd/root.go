@@ -21,12 +21,11 @@ var rootCmd = &cobra.Command{
 
 		config, _ := cmd.Flags().GetString("kubeconfig")
 		namespace, _ := cmd.Flags().GetString("namespace")
-		debug, _ := cmd.Flags().GetBool("debug")
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		go controller.Start(ctx, config, namespace, debug)
+		go controller.Start(ctx, config, namespace)
 
 		// Wait forever
 		select {}
@@ -36,8 +35,9 @@ var rootCmd = &cobra.Command{
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
-		os.Exit(-1)
+		os.Exit(1)
 	}
+	os.Exit(0)
 }
 
 func init() {

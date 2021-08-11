@@ -20,7 +20,7 @@ import (
 	"github.com/gajananan/argocd-interlace/pkg/utils"
 	"github.com/sigstore/k8s-manifest-sigstore/pkg/k8smanifest"
 	k8smnfutil "github.com/sigstore/k8s-manifest-sigstore/pkg/util"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"gopkg.in/yaml.v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,22 +38,21 @@ type controller struct {
 	informer             cache.SharedIndexInformer
 	appRefreshQueue      workqueue.RateLimitingInterface
 	namespace            string
-	debug                bool
 }
 
 const (
-	KEY_PATH     = "/etc/signing-secrets/cosign.key"
-	PUB_KEY_PATH = "/etc/signing-secrets/cosign.pub"
+	PRIVATE_KEY_PATH = "/etc/signing-secrets/cosign.key"
+	PUB_KEY_PATH     = "/etc/signing-secrets/cosign.pub"
 )
 
-func Start(ctx context.Context, config string, namespace string, debug bool) {
-	_, cfg, err := utils.GetClient(config, debug)
+func Start(ctx context.Context, config string, namespace string) {
+	_, cfg, err := utils.GetClient(config)
 	appClientset := appClientset.NewForConfigOrDie(cfg)
 	if err != nil {
-		logrus.Fatal(err)
+		log.Fatalf("error occured during starting argocd interlace controller", err.Error())
 	}
 
-	c := newController(appClientset, namespace, debug)
+	c := newController(appClientset, namespace)
 	c.Run(ctx)
 }
 
@@ -75,16 +74,15 @@ func (ctrl *controller) newApplicationInformer(applicationClientset appClientset
 	return informer
 }
 
-func newController(applicationClientset appClientset.Interface, namespace string, debug bool /*, clientOpts *argocdclient.ClientOptions*/) *controller {
+func newController(applicationClientset appClientset.Interface, namespace string) *controller {
 	q := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
 	ctrl := &controller{
 		applicationClientset: applicationClientset,
 		appRefreshQueue:      q,
 		namespace:            namespace,
-		debug:                debug,
 	}
-	imageRef := "gcr.io/kg-image-registry/akeme-signed-dev:1.0.0"
+
 	appInformer := ctrl.newApplicationInformer(applicationClientset)
 	appInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -96,7 +94,8 @@ func newController(applicationClientset appClientset.Interface, namespace string
 			app, ok := obj.(*appv1.Application)
 			if ok {
 				appName := app.ObjectMeta.Name
-				appPath := app.Status.Sync.ComparedTo.Source.Path
+				//appPath := app.Status.Sync.ComparedTo.Source.Path
+				//appSourceRepoUrl := app.Status.Sync.ComparedTo.Source.RepoURL
 
 				desiredManifest := retriveApplicationResources(appName)
 
@@ -104,9 +103,7 @@ func newController(applicationClientset appClientset.Interface, namespace string
 
 				finalManifest := ""
 
-				if ctrl.debug {
-					fmt.Println("len(items.Array()) ", len(items.Array()))
-				}
+				log.Debug("len(items.Array()) ", len(items.Array()))
 
 				for i, item := range items.Array() {
 
@@ -114,37 +111,35 @@ func newController(applicationClientset appClientset.Interface, namespace string
 
 					finalManifest = prepareFinalManifest(targetState, finalManifest, i, len(items.Array())-1)
 				}
+				/*
+					fmt.Println("---------Event Recieved---------")
+					loc, _ := time.LoadLocation("UTC")
+					buildStartedOn := time.Now().In(loc)
 
-				fmt.Println("---------Event Recieved---------")
-				loc, _ := time.LoadLocation("UTC")
-				buildStartedOn := time.Now().In(loc)
+					fmt.Println()
+					fmt.Println("------------------ Source Git Repo  --------------")
 
-				fmt.Println()
-				fmt.Println("------------------ Source Git Repo  --------------")
+					fmt.Println("url: ", app.Status.Sync.ComparedTo.Source.RepoURL)
+					fmt.Println("path: ", app.Status.Sync.ComparedTo.Source.Path)
+					fmt.Println("targetRevision: ", app.Status.Sync.ComparedTo.Source.TargetRevision)
+					fmt.Println("commit id: ", app.Status.Sync.Revision)
 
-				fmt.Println("url: ", app.Status.Sync.ComparedTo.Source.RepoURL)
-				fmt.Println("path: ", app.Status.Sync.ComparedTo.Source.Path)
-				fmt.Println("targetRevision: ", app.Status.Sync.ComparedTo.Source.TargetRevision)
-				fmt.Println("commit id: ", app.Status.Sync.Revision)
+					appSourceRepoUrl := app.Status.Sync.ComparedTo.Source.RepoURL
+					appSourceRevision := app.Status.Sync.ComparedTo.Source.TargetRevision
+					appSourceCommitSha := app.Status.Sync.Revision
 
-				appSourceRepoUrl := app.Status.Sync.ComparedTo.Source.RepoURL
-				appSourceRevision := app.Status.Sync.ComparedTo.Source.TargetRevision
-				appSourceCommitSha := app.Status.Sync.Revision
-
-				signAndGenerateProv(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
-					finalManifest, imageRef, buildStartedOn)
-				fmt.Println("--------------------------------------------------")
-				fmt.Println("--------- Completed Processing Event---------")
+					signAndGenerateProv(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
+						finalManifest, imageRef, buildStartedOn)
+					fmt.Println("--------------------------------------------------")
+					fmt.Println("--------- Completed Processing Event---------")
+				*/
 			}
 
 			if err == nil {
-				//if ctrl.debug {
-				//	logrus.Infof("Event received of type create for key [%s] ", key)
-				//}
+				//log.Debug("Event received of type create for key [%s] ", key)
 				ctrl.appRefreshQueue.Add(key)
-				if ctrl.debug {
-					logrus.Infof("Event queue size: %v", ctrl.appRefreshQueue.Len())
-				}
+				//log.Debug("Event queue size: %v", ctrl.appRefreshQueue.Len())
+
 			}
 
 		},
@@ -160,33 +155,30 @@ func newController(applicationClientset appClientset.Interface, namespace string
 				appName := newApp.ObjectMeta.Name
 				appPath := newApp.Status.Sync.ComparedTo.Source.Path
 
-				/*if ctrl.debug {
+				//log.Debug("oldApp.Status ", oldApp.Status)
+				//log.Debug("-------------------------")
+				//log.Debug("newApp.Status ", newApp.Status)
 
-					logrus.Infof("oldApp.Status ", oldApp.Status)
-					logrus.Infof("-------------------------")
-					logrus.Infof("newApp.Status ", newApp.Status)
-				}*/
+				log.Debug(fmt.Sprintf("oldApp.Status.Health.Status %s ", oldApp.Status.Health.Status))
 
-				if ctrl.debug {
-					fmt.Println(fmt.Sprintf("oldApp.Status.Health.Status %s ", oldApp.Status.Health.Status))
-					if oldApp.Status.OperationState != nil {
-						fmt.Println(fmt.Sprintf("oldApp.Status.OperationState.Phase %s ", oldApp.Status.OperationState.Phase))
-					} else {
-						fmt.Println(fmt.Sprintf("oldApp.Status.OperationState %s ", oldApp.Status.OperationState))
-					}
+				if oldApp.Status.OperationState != nil {
+					log.Debug(fmt.Sprintf("oldApp.Status.OperationState.Phase %s ", oldApp.Status.OperationState.Phase))
 
-					fmt.Println(fmt.Sprintf("oldApp.Status.Sync.Status %s ", oldApp.Status.Sync.Status))
-
-					fmt.Println(fmt.Sprintf("newApp.Status.Health.Status %s ", newApp.Status.Health.Status))
-
-					if newApp.Status.OperationState != nil {
-						fmt.Println(fmt.Sprintf("newApp.Status.OperationState.Phase %s ", newApp.Status.OperationState.Phase))
-					} else {
-						fmt.Println(fmt.Sprintf("newApp.Status.OperationState %s ", newApp.Status.OperationState))
-					}
-
-					fmt.Println(fmt.Sprintf("newApp.Status.Sync.Status %s ", newApp.Status.Sync.Status))
+				} else {
+					log.Debug(fmt.Sprintf("oldApp.Status.OperationState %s ", oldApp.Status.OperationState))
 				}
+
+				log.Debug(fmt.Sprintf("oldApp.Status.Sync.Status %s ", oldApp.Status.Sync.Status))
+
+				log.Debug(fmt.Sprintf("newApp.Status.Health.Status %s ", newApp.Status.Health.Status))
+
+				if newApp.Status.OperationState != nil {
+					log.Debug(fmt.Sprintf("newApp.Status.OperationState.Phase %s ", newApp.Status.OperationState.Phase))
+				} else {
+					log.Debug(fmt.Sprintf("newApp.Status.OperationState %s ", newApp.Status.OperationState))
+				}
+
+				log.Debug(fmt.Sprintf("newApp.Status.Sync.Status %s ", newApp.Status.Sync.Status))
 
 				if oldApp.Status.OperationState != nil &&
 					oldApp.Status.OperationState.Phase == "Running" &&
@@ -200,11 +192,14 @@ func newController(applicationClientset appClientset.Interface, namespace string
 					items := gjson.Get(desiredManifest, "items")
 
 					finalManifest := ""
-					if ctrl.debug {
-						fmt.Println("len(items.Array()) ", len(items.Array()))
-					}
+					log.Debug("len(items.Array()) ", len(items.Array()))
 
 					diffCount := 0
+
+					appSourceRepoUrl := newApp.Status.Sync.ComparedTo.Source.RepoURL
+					appSourceRevision := newApp.Status.Sync.ComparedTo.Source.TargetRevision
+					appSourceCommitSha := newApp.Status.Sync.Revision
+					imageRef := getImageRef(appName, appPath, appSourceRepoUrl)
 
 					bundleYAMLBytes, err := getBundleManifest(imageRef)
 
@@ -215,39 +210,28 @@ func newController(applicationClientset appClientset.Interface, namespace string
 						diffCount += 1
 					}
 
-					if diffCount == 0 {
-						for i, item := range items.Array() {
+					for i, item := range items.Array() {
 
-							targetState := gjson.Get(item.String(), "targetState").String()
-							liveState := gjson.Get(item.String(), "liveState").String()
+						targetState := gjson.Get(item.String(), "targetState").String()
 
-							if ctrl.debug {
-								kind := gjson.Get(targetState, "kind").String()
-								name := gjson.Get(targetState, "metadata.name").String()
-								if kind == "Deployment" && name == "akme-account-command" {
-									targetImage := gjson.Get(targetState, "spec.template.spec.containers.0.image").String()
-									liveImage := gjson.Get(liveState, "spec.template.spec.containers.0.image").String()
-									fmt.Println(fmt.Sprintf("targetState image %s", targetImage))
-									fmt.Println(fmt.Sprintf("liveState image: %s", liveImage))
-
-								}
-							}
-
+						if diffCount == 0 {
 							diffExist := checkDiffWithBundle([]byte(targetState), manifestYAMLs)
 							if diffExist {
 								diffCount += 1
 							}
-
-							finalManifest = prepareFinalManifest(targetState, finalManifest, i, len(items.Array())-1)
 						}
+
+						finalManifest = prepareFinalManifest(targetState, finalManifest, i, len(items.Array())-1)
 					}
+
+					log.Info("diffCount ", diffCount)
 					if diffCount > 0 {
-						fmt.Println("---------Event Recieved---------")
+						log.Info("---------Event Recieved---------")
 						loc, _ := time.LoadLocation("UTC")
 						buildStartedOn := time.Now().In(loc)
 
-						fmt.Println()
-						fmt.Println("------------------ Source Git Repo  --------------")
+						log.Info()
+						log.Info("------------------ Source Git Repo  --------------")
 						/*
 							fmt.Println("url: ", oldApp.Status.Sync.ComparedTo.Source.RepoURL)
 							fmt.Println("path: ", oldApp.Status.Sync.ComparedTo.Source.Path)
@@ -257,32 +241,31 @@ func newController(applicationClientset appClientset.Interface, namespace string
 							fmt.Println("----------")
 						*/
 
-						fmt.Println("url: ", newApp.Status.Sync.ComparedTo.Source.RepoURL)
-						fmt.Println("path: ", newApp.Status.Sync.ComparedTo.Source.Path)
-						fmt.Println("targetRevision: ", newApp.Status.Sync.ComparedTo.Source.TargetRevision)
-						fmt.Println("commit id: ", newApp.Status.Sync.Revision)
+						log.Info("url: ", newApp.Status.Sync.ComparedTo.Source.RepoURL)
+						log.Info("path: ", newApp.Status.Sync.ComparedTo.Source.Path)
+						log.Info("targetRevision: ", newApp.Status.Sync.ComparedTo.Source.TargetRevision)
+						log.Info("commit id: ", newApp.Status.Sync.Revision)
 
-						appSourceRepoUrl := newApp.Status.Sync.ComparedTo.Source.RepoURL
-						appSourceRevision := newApp.Status.Sync.ComparedTo.Source.TargetRevision
-						appSourceCommitSha := newApp.Status.Sync.Revision
-
+						if finalManifest == "" {
+							log.Info("finalManifest is empty", finalManifest)
+						}
 						signAndGenerateProv(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
 							finalManifest, imageRef, buildStartedOn)
-						fmt.Println("--------------------------------------------------")
-						fmt.Println("--------- Completed Processing Event---------")
+
+						log.Info("--------------------------------------------------")
+						log.Info("--------- Completed Processing Event---------")
 					}
 
 				}
 
 			}
 			if err == nil {
-				if ctrl.debug {
-					logrus.Infof("Event received of type update for  [%s] ", key)
-				}
+				log.Debug("Event received of type update for  [%s] ", key)
+
 				ctrl.appRefreshQueue.Add(key)
-				if ctrl.debug {
-					logrus.Infof("Event queue size: %v ", ctrl.appRefreshQueue.Len())
-				}
+
+				log.Debug("Event queue size: %v ", ctrl.appRefreshQueue.Len())
+
 			}
 
 		},
@@ -293,13 +276,12 @@ func newController(applicationClientset appClientset.Interface, namespace string
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 
 			if err == nil {
-				if ctrl.debug {
-					logrus.Infof("Event received of type delete for key [%s] ", key)
-				}
+				log.Debug("Event received of type delete for key [%s] ", key)
+
 				//ctrl.appRefreshQueue.Add(key)
-				if ctrl.debug {
-					logrus.Infof("Event queue size %v", ctrl.appRefreshQueue.Len())
-				}
+
+				log.Debug("Event queue size %v", ctrl.appRefreshQueue.Len())
+
 			}
 
 		},
@@ -309,6 +291,18 @@ func newController(applicationClientset appClientset.Interface, namespace string
 	return ctrl
 }
 
+func getImageRef(appName, appPath, appSourceRepoUrl string) string {
+	imageRef := ""
+	tokens := strings.Split(appSourceRepoUrl, "/")
+	if len(tokens) > 2 {
+		repoName := tokens[3]
+		imageRegistry := os.Getenv("IMAGE_REGISTRY")
+		imageName := fmt.Sprintf("%s-%s", repoName, appName)
+		tag := strings.ReplaceAll(appPath, "/", "-")
+		imageRef = fmt.Sprintf("%s/%s:%s", imageRegistry, imageName, tag)
+	}
+	return imageRef
+}
 func prepareFinalManifest(targetState, finalManifest string, counter int, numberOfitem int) string {
 	var obj *unstructured.Unstructured
 	err := json.Unmarshal([]byte(targetState), &obj)
@@ -354,36 +348,33 @@ func signAndGenerateProv(appName, appPath, appSourceRepoUrl, appSourceRevision, 
 
 	utils.WriteToFile(string(finalManifest), outfilepath)
 
-	signManifest(outfilepath, imageRef, KEY_PATH)
+	signManifest(outfilepath, imageRef, PRIVATE_KEY_PATH)
 
 	loc, _ := time.LoadLocation("UTC")
 	buildFinishedOn := time.Now().In(loc)
 
-	GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, KEY_PATH, PUB_KEY_PATH, imageRef, buildStartedOn, buildFinishedOn)
+	GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, PRIVATE_KEY_PATH, PUB_KEY_PATH, imageRef, buildStartedOn, buildFinishedOn)
 
 }
 
 func checkDiffWithBundle(targetObjYAMLBytes []byte, manifestYAMLs [][]byte) bool {
 
-	//fmt.Println("Call NewFromBytes")
 	objNode, err := mapnode.NewFromBytes(targetObjYAMLBytes) // json
-	//fmt.Println("targetObjYAMLBytes ", string(targetObjYAMLBytes))
+	log.Debug("targetObjYAMLBytes ", string(targetObjYAMLBytes))
 	if err != nil {
-		fmt.Println("objNode error from NewFromYamlBytes ", err)
+		log.Fatalf("objNode error from NewFromYamlBytes %s", err.Error())
 		// do somthing
 	}
 	found := false
 	for _, manifest := range manifestYAMLs {
-		fmt.Println("manifest ", string(manifest))
+		//fmt.Println("manifest ", string(manifest))
 		mnfNode, err := mapnode.NewFromYamlBytes(manifest)
 		if err != nil {
-			fmt.Println("mnfNode error from NewFromYamlBytes ", err)
+			log.Fatalf("mnfNode error from NewFromYamlBytes %s", err.Error())
 			// do somthing
 		}
 		diffs := objNode.Diff(mnfNode)
-		if diffs == nil {
-			fmt.Println(" diffs == nil ")
-		}
+
 		if diffs == nil || diffs.Size() == 0 {
 			found = true
 			break
@@ -398,14 +389,16 @@ func getBundleManifest(imageRef string) ([]byte, error) {
 	image, err := k8smnfutil.PullImage(imageRef)
 
 	if err != nil {
-		fmt.Println("Error in pulling image err ", err)
+		log.Info("Error in pulling image err %s", err.Error())
 		return nil, err
 	}
-	//imageManifest, _ := image.RawManifest()
-	//fmt.Println("imageManifest ", string(imageManifest))
+
+	imageManifest, _ := image.RawManifest()
+	log.Debug("imageManifest ", string(imageManifest))
+
 	concatYAMLbytes, err := k8smnfutil.GenerateConcatYAMLsFromImage(image)
 	if err != nil {
-		fmt.Println("Error in GenerateConcatYAMLsFromImage err ", err)
+		log.Info("Error in GenerateConcatYAMLsFromImage err %s", err.Error())
 		return nil, err
 	}
 	return concatYAMLbytes, nil
@@ -440,19 +433,19 @@ func queryAPI(url string, data map[string]string) string {
 	}
 	req, err := http.NewRequest("GET", url, bytes.NewBuffer(dataJson))
 	if err != nil {
-		logrus.Infof("Error %s ", err)
+		log.Info("Error %s ", err)
 	}
 
 	req.Header.Add("Authorization", bearer)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		logrus.Infof("Error %s ", err)
+		log.Info("Error %s ", err)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		logrus.Infof("Error %s ", err)
+		log.Info("Error %s ", err)
 	}
 
 	return string([]byte(body))
@@ -471,21 +464,21 @@ func (c *controller) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()    //this will handle panic and won't crash the process
 	defer c.appRefreshQueue.ShutDown() //shutdown all workqueue and terminate all workers
 
-	logrus.Info("Starting argocd-interlace...")
+	log.Info("Starting argocd-interlace...")
 
 	go c.informer.Run(ctx.Done())
 
-	logrus.Info("Synchronizing events...")
+	log.Info("Synchronizing events...")
 
 	//synchronize the cache before starting to process events
 	if !cache.WaitForCacheSync(ctx.Done(), c.informer.HasSynced) {
 		utilruntime.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
-		logrus.Info("synchronization failed...")
+		log.Info("synchronization failed...")
 		return
 	}
 
-	logrus.Info("Synchronization complete!")
-	logrus.Info("Ready to process events")
+	log.Info("Synchronization complete!")
+	log.Info("Ready to process events")
 
 	go wait.Until(func() {
 		for c.processNextItem() {
@@ -496,9 +489,8 @@ func (c *controller) Run(ctx context.Context) {
 }
 
 func (c *controller) processNextItem() (processNext bool) {
-	if c.debug {
-		logrus.Info("Check if new events in queue ", c.appRefreshQueue.Len())
-	}
+	log.Debug("Check if new events in queue ", c.appRefreshQueue.Len())
+
 	appKey, shutdown := c.appRefreshQueue.Get()
 
 	if shutdown {
@@ -509,7 +501,7 @@ func (c *controller) processNextItem() (processNext bool) {
 	processNext = true
 	defer func() {
 		if r := recover(); r != nil {
-			logrus.Errorf("Recovered from panic: %+v\n%s", r, debug.Stack())
+			log.Errorf("Recovered from panic: %+v\n%s", r, debug.Stack())
 		}
 		c.appRefreshQueue.Done(appKey)
 	}()
@@ -534,12 +526,12 @@ func (c *controller) processItem(key string) error {
 	}
 	_, ok := obj.(*appv1.Application)
 	if !ok {
-		logrus.Warnf("Key '%s' in index is not an application", key)
+		log.Warnf("Key '%s' in index is not an application", key)
 		return nil
 	}
 	//Use a switch clause instead and process the events based on the type
-	/*if c.debug {
-		logrus.Infof("argocd- has processed 1 event for object [%s]", obj)
-	}*/
+
+	//log.Debug("argocd- has processed 1 event for object [%s]", obj)
+
 	return nil
 }
