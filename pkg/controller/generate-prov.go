@@ -23,6 +23,7 @@ import (
 	"github.com/in-toto/in-toto-golang/in_toto"
 	"github.com/in-toto/in-toto-golang/pkg/ssl"
 	"github.com/sigstore/cosign/pkg/cosign"
+	log "github.com/sirupsen/logrus"
 	"github.com/theupdateframework/go-tuf/encrypted"
 	"golang.org/x/term"
 )
@@ -50,14 +51,17 @@ func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, a
 
 	subjects := []in_toto.Subject{}
 	productName := imageRef
-	//productPath := filepath.Join("/tmp/output", appName, appPath, "manifest.yaml")
 
-	digest, _ := getDigest(productName)
+	digest, err := getDigest(productName)
+	if err != nil {
+		log.Info("Error in getting digest: %s ", err.Error())
+	}
+
 	digest = strings.ReplaceAll(digest, "sha256:", "")
-	fmt.Println("digest ", digest)
+	log.Info("digest ", digest)
 	subjects = append(subjects, in_toto.Subject{Name: productName,
 		Digest: in_toto.DigestSet{
-			"sha256": digest, //getDigestFromFile(productPath),
+			"sha256": digest,
 		},
 	})
 
@@ -66,7 +70,7 @@ func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, a
 	entryPoint := "argocd-interlace"
 	recipe := in_toto.ProvenanceRecipe{
 		EntryPoint: entryPoint,
-		Arguments:  []string{},
+		Arguments:  []string{"-n argocd"},
 	}
 
 	it := in_toto.Statement{
@@ -88,7 +92,7 @@ func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, a
 	}
 	b, err := json.Marshal(it)
 	if err != nil {
-		fmt.Println("Error in marshaling it")
+		log.Info("Error in marshaling attestation:  %s", err.Error())
 	}
 
 	dirPath := filepath.Join("/tmp/output", appName, appPath)
@@ -199,8 +203,9 @@ func generateSignedAttestation(it in_toto.Statement, privKeyPath string, pubKeyP
 
 	bytes, err := f.Write(eb)
 
-	fmt.Println("attestation.json", string(eb))
-	fmt.Printf(fmt.Sprintf("Generated attestation.json, wrote %d bytes\n", bytes))
+	log.Debug("attestation.json", string(eb))
+
+	log.Info(fmt.Sprintf("Generated attestation.json, wrote %d bytes\n", bytes))
 
 	upload(it, attestationPath, pubKeyPath)
 
@@ -272,19 +277,17 @@ func upload(it in_toto.Statement, attestationPath string, pubKeyPath string) {
 	// If we do it twice, it should already exist
 	out := runCli("upload", "--artifact", attestationPath, "--type", "intoto", "--public-key", pubKeyPath, "--pki-format", "x509")
 
-	//fmt.Println("out ", out)
-
 	outputContains(out, "Created entry at")
 
 	uuid := getUUIDFromUploadOutput(out)
 
-	fmt.Println("uuid", uuid)
+	log.Info("Uploaded attestation to tlog,  uuid: %s", uuid)
 }
 
 func outputContains(output, sub string) {
 
 	if !strings.Contains(output, sub) {
-		fmt.Println(fmt.Sprintf("Expected [%s] in response, got %s", sub, output))
+		log.Info(fmt.Sprintf("Expected [%s] in response, got %s", sub, output))
 	}
 }
 
