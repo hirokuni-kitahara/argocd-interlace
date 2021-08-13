@@ -78,13 +78,13 @@ func newController(applicationClientset appClientset.Interface, namespace string
 				return
 			}
 			key, err := cache.MetaNamespaceKeyFunc(obj)
+			/*
+				app, ok := obj.(*appv1.Application)
 
-			app, ok := obj.(*appv1.Application)
-
-			if ok {
-				manifest.CreateEventHandler(app, PRIVATE_KEY_PATH, PUB_KEY_PATH)
-			}
-
+				if ok {
+					manifest.CreateEventHandler(app, PRIVATE_KEY_PATH, PUB_KEY_PATH)
+				}
+			*/
 			if err == nil {
 				ctrl.appRefreshQueue.Add(key)
 			}

@@ -21,10 +21,8 @@ import (
 )
 
 func CreateEventHandler(app *appv1.Application, privateKeyPath, publicKeyPath string) {
+	log.Debug("app ", app)
 	appName := app.ObjectMeta.Name
-
-	// Do not use app.Status  in create event.
-	appPath := app.Status.Sync.ComparedTo.Source.Path
 
 	desiredManifest := retriveDesiredManifest(appName)
 
@@ -40,30 +38,40 @@ func CreateEventHandler(app *appv1.Application, privateKeyPath, publicKeyPath st
 
 		finalManifest = prepareFinalManifest(targetState, finalManifest, i, len(items.Array())-1)
 	}
+	// if finalmanifest is empty, replace ARGOCD_TOKEN in argocd-token-secret
+	if finalManifest == "" {
+		log.Info("finalManifest is empty, skipping generating bundle manifest", finalManifest)
+	} else {
 
-	log.Info("---------Event Received---------")
-	loc, _ := time.LoadLocation("UTC")
-	buildStartedOn := time.Now().In(loc)
+		log.Info("---------Event Received---------")
+		loc, _ := time.LoadLocation("UTC")
+		buildStartedOn := time.Now().In(loc)
 
-	log.Info()
-	log.Info("------------------ Source Git Repo  --------------")
+		log.Info()
+		log.Info("------------------ Source Git Repo  --------------")
+		// can not use app.Status.Sync in creationEventHandler as it is nil.
 
-	log.Info("url: ", app.Status.Sync.ComparedTo.Source.RepoURL)
-	log.Info("path: ", app.Status.Sync.ComparedTo.Source.Path)
-	log.Info("targetRevision: ", app.Status.Sync.ComparedTo.Source.TargetRevision)
-	log.Info("commit id: ", app.Status.Sync.Revision)
+		log.Info("url: ", app.Spec.Source.RepoURL)
+		log.Info("path: ", app.Spec.Source.Path)
+		log.Info("targetRevision: ", app.Spec.Source.TargetRevision)
 
-	appSourceRepoUrl := app.Status.Sync.ComparedTo.Source.RepoURL
-	appSourceRevision := app.Status.Sync.ComparedTo.Source.TargetRevision
-	appSourceCommitSha := app.Status.Sync.Revision
-	log.Info("app.Status ", app.Status)
-	imageRef := getImageRef(appName, appPath, appSourceRepoUrl)
+		//log.Info("commit id: ", app.Status.Sync.Revision)
 
-	signAndGenerateProvenance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
-		finalManifest, imageRef, privateKeyPath, publicKeyPath, buildStartedOn)
+		// Do not use app.Status  in create event.
+		appSourceRepoUrl := app.Spec.Source.RepoURL
+		appSourceRevision := app.Spec.Source.TargetRevision
+		//TODO: How to get revision
+		appSourceCommitSha := app.Spec.Source.TargetRevision
+		appPath := app.Spec.Source.Path
 
-	log.Info("--------------------------------------------------")
-	log.Info("--------- Completed Processing Event---------")
+		log.Debug("app.Status ", app.Status)
+		imageRef := getImageRef(appName)
+		signAndGenerateProvenance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
+			finalManifest, imageRef, privateKeyPath, publicKeyPath, buildStartedOn)
+
+		log.Info("--------------------------------------------------")
+		log.Info("--------- Completed Processing Event---------")
+	}
 
 }
 
@@ -92,13 +100,32 @@ func UpdateEventHandler(oldApp, newApp *appv1.Application, privateKeyPath, publi
 
 	log.Debug(fmt.Sprintf("newApp.Status.Sync.Status %s ", newApp.Status.Sync.Status))
 
-	if oldApp.Status.OperationState != nil &&
+	generateManifest := false
+	if oldApp.Status.Health.Status == "" &&
+		oldApp.Status.OperationState != nil &&
+		oldApp.Status.OperationState.Phase == "Running" &&
+		oldApp.Status.Sync.Status == "" &&
+		newApp.Status.Health.Status == "Missing" &&
+		newApp.Status.OperationState != nil &&
+		newApp.Status.OperationState.Phase == "Running" &&
+		newApp.Status.Sync.Status == "OutOfSync" {
+		log.Info("---------Update after create-----------")
+		log.Info("oldApp ", oldApp)
+		log.Info("-------")
+		log.Info("newApp ", newApp)
+		log.Info("--------- ###### -----------")
+
+		generateManifest = true
+	} else if oldApp.Status.OperationState != nil &&
 		oldApp.Status.OperationState.Phase == "Running" &&
 		oldApp.Status.Sync.Status == "Synced" &&
 		newApp.Status.OperationState != nil &&
 		newApp.Status.OperationState.Phase == "Running" &&
 		newApp.Status.Sync.Status == "OutOfSync" {
+		generateManifest = true
+	}
 
+	if generateManifest {
 		finalManifest := ""
 
 		diffCount := 0
@@ -106,7 +133,8 @@ func UpdateEventHandler(oldApp, newApp *appv1.Application, privateKeyPath, publi
 		appSourceRepoUrl := newApp.Status.Sync.ComparedTo.Source.RepoURL
 		appSourceRevision := newApp.Status.Sync.ComparedTo.Source.TargetRevision
 		appSourceCommitSha := newApp.Status.Sync.Revision
-		imageRef := getImageRef(appName, appPath, appSourceRepoUrl)
+
+		imageRef := getImageRef(appName)
 
 		bundleYAMLBytes, err := getBundleManifest(imageRef)
 		// if manifest not found, create new bundle without checking if diff exist
@@ -133,9 +161,13 @@ func UpdateEventHandler(oldApp, newApp *appv1.Application, privateKeyPath, publi
 
 			finalManifest = prepareFinalManifest(targetState, finalManifest, i, len(items.Array())-1)
 		}
+		// if finalmanifest is empty, replace ARGOCD_TOKEN in argocd-token-secret
+		if finalManifest == "" {
+			log.Info("finalManifest is empty, skipping generating bundle manifest", finalManifest)
+		}
 
 		log.Info("diffCount ", diffCount)
-		if diffCount > 0 {
+		if finalManifest != "" && diffCount > 0 {
 			log.Info("---------Event Received---------")
 			loc, _ := time.LoadLocation("UTC")
 			buildStartedOn := time.Now().In(loc)
@@ -156,10 +188,6 @@ func UpdateEventHandler(oldApp, newApp *appv1.Application, privateKeyPath, publi
 			log.Info("targetRevision: ", newApp.Status.Sync.ComparedTo.Source.TargetRevision)
 			log.Info("commit id: ", newApp.Status.Sync.Revision)
 
-			// if finalmanifest is empty, replace ARGOCD_TOKEN in argocd-token-secret
-			if finalManifest == "" {
-				log.Info("finalManifest is empty", finalManifest)
-			}
 			signAndGenerateProvenance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
 				finalManifest, imageRef, privateKeyPath, publicKeyPath, buildStartedOn)
 
@@ -171,18 +199,34 @@ func UpdateEventHandler(oldApp, newApp *appv1.Application, privateKeyPath, publi
 
 }
 
-func getImageRef(appName, appPath, appSourceRepoUrl string) string {
+func getImageRef(appName string) string {
+	imageRef := ""
+	imageRegistry := os.Getenv("IMAGE_REGISTRY")
+	imagePrefix := os.Getenv("IMAGE_PREFIX")
+	imageTag := os.Getenv("IMAGE_TAG")
+
+	imageName := fmt.Sprintf("%s-%s", imagePrefix, appName)
+
+	imageRef = fmt.Sprintf("%s/%s:%s", imageRegistry, imageName, imageTag)
+
+	return imageRef
+
+}
+
+/*
+func getImageRef(appName, targetRevision, appPath, appSourceRepoUrl string) string {
 	imageRef := ""
 	tokens := strings.Split(appSourceRepoUrl, "/")
 	if len(tokens) > 2 {
 		repoName := tokens[3]
 		imageRegistry := os.Getenv("IMAGE_REGISTRY")
-		imageName := fmt.Sprintf("%s-%s", repoName, appName)
+		imageName := fmt.Sprintf("%s-%s-%s", appName, repoName, targetRevision)
 		tag := strings.ReplaceAll(appPath, "/", "-")
 		imageRef = fmt.Sprintf("%s/%s:%s", imageRegistry, imageName, tag)
 	}
 	return imageRef
 }
+*/
 
 func getBundleManifest(imageRef string) ([]byte, error) {
 
