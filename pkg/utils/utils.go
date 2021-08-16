@@ -17,11 +17,13 @@ import (
 )
 
 const (
-	TMP_DIR                   = "/tmp/output"
 	MANIFEST_FILE_NAME        = "manifest.yaml"
 	SIGNED_MANIFEST_FILE_NAME = "manifest.signed"
 	PROVENANCE_FILE_NAME      = "provenance.yaml"
 	ATTESTATION_FILE_NAME     = "attestation.json"
+	TMP_DIR                   = "/tmp/output"
+	PRIVATE_KEY_PATH          = "/etc/signing-secrets/cosign.key"
+	PUB_KEY_PATH              = "/etc/signing-secrets/cosign.pub"
 )
 
 //GetClient returns a kubernetes client

@@ -46,7 +46,7 @@ var (
 	Read = readPasswordFn
 )
 
-func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, privKeyPath, pubKeyPath, imageRef string, buildStartedOn, buildFinishedOn time.Time) {
+func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha, imageRef string, buildStartedOn, buildFinishedOn time.Time) {
 
 	subjects := []in_toto.Subject{}
 	productName := imageRef
@@ -98,7 +98,7 @@ func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, a
 
 	utils.WriteToFile(string(b), appDirPath, utils.PROVENANCE_FILE_NAME)
 
-	generateSignedAttestation(it, privKeyPath, pubKeyPath, appDirPath)
+	generateSignedAttestation(it, appDirPath)
 
 }
 
@@ -127,7 +127,7 @@ func generateMaterial(appName, appPath, appSourceRepoUrl, appSourceRevision, app
 	return materials
 }
 
-func generateSignedAttestation(it in_toto.Statement, privKeyPath string, pubKeyPath string, appDirPath string) {
+func generateSignedAttestation(it in_toto.Statement, appDirPath string) {
 
 	b, err := json.Marshal(it)
 	if err != nil {
@@ -135,7 +135,7 @@ func generateSignedAttestation(it in_toto.Statement, privKeyPath string, pubKeyP
 		return
 	}
 
-	ecdsaPriv, _ := ioutil.ReadFile(filepath.Clean(privKeyPath))
+	ecdsaPriv, _ := ioutil.ReadFile(filepath.Clean(utils.PRIVATE_KEY_PATH))
 
 	pb, _ := pem.Decode(ecdsaPriv)
 
@@ -187,7 +187,7 @@ func generateSignedAttestation(it in_toto.Statement, privKeyPath string, pubKeyP
 
 	attestationPath := filepath.Join(appDirPath, utils.ATTESTATION_FILE_NAME)
 
-	upload(it, attestationPath, pubKeyPath)
+	upload(it, attestationPath)
 
 }
 
@@ -252,8 +252,9 @@ func (it *IntotoSigner) Verify(_ string, data, sig []byte) error {
 	return errors.New("invalid signature")
 }
 
-func upload(it in_toto.Statement, attestationPath string, pubKeyPath string) {
+func upload(it in_toto.Statement, attestationPath string) {
 
+	pubKeyPath := utils.PUB_KEY_PATH
 	// If we do it twice, it should already exist
 	out := runCli("upload", "--artifact", attestationPath, "--type", "intoto", "--public-key", pubKeyPath, "--pki-format", "x509")
 
