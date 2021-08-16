@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/gajananan/argocd-interlace/pkg/controller"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +34,8 @@ var rootCmd = &cobra.Command{
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		log.Info("Error in executing argocd-interlace commmand: %s", err.Error())
+
 		os.Exit(1)
 	}
 	os.Exit(0)

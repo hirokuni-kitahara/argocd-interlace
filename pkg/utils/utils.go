@@ -8,11 +8,20 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+)
+
+const (
+	TMP_DIR                   = "/tmp/output"
+	MANIFEST_FILE_NAME        = "manifest.yaml"
+	SIGNED_MANIFEST_FILE_NAME = "manifest.signed"
+	PROVENANCE_FILE_NAME      = "provenance.yaml"
+	ATTESTATION_FILE_NAME     = "attestation.json"
 )
 
 //GetClient returns a kubernetes client
@@ -40,17 +49,23 @@ func GetClient(configpath string) (*kubernetes.Clientset, *rest.Config, error) {
 	return clientset, config, nil
 }
 
-func WriteToFile(str string, filename string) {
+func WriteToFile(str, dirPath, filename string) {
 
-	f, err := os.Create(filename)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		os.MkdirAll(dirPath, os.ModePerm)
+	}
+
+	absFilePath := filepath.Join(dirPath, filename)
+
+	f, err := os.Create(absFilePath)
 	if err != nil {
-		log.Fatalf("Error occured while opening file %s :%v", filename, err)
+		log.Fatalf("Error occured while opening file %s :%v", absFilePath, err)
 	}
 
 	defer f.Close()
 	_, err = f.WriteString(str)
 	if err != nil {
-		log.Fatalf("Error occured while writing to file %s :%v", filename, err)
+		log.Fatalf("Error occured while writing to file %s :%v", absFilePath, err)
 	}
 
 }

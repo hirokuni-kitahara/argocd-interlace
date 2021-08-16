@@ -10,7 +10,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -95,18 +94,11 @@ func GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, a
 		log.Info("Error in marshaling attestation:  %s", err.Error())
 	}
 
-	dirPath := filepath.Join("/tmp/output", appName, appPath)
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		os.MkdirAll(dirPath, os.ModePerm)
-	}
+	appDirPath := filepath.Join(utils.TMP_DIR, appName, appPath)
 
-	provoutfilepath := filepath.Join(dirPath, "provenance.yaml")
+	utils.WriteToFile(string(b), appDirPath, utils.PROVENANCE_FILE_NAME)
 
-	utils.WriteToFile(string(b), provoutfilepath)
-
-	attestationPath := filepath.Join(dirPath, "attestation.json")
-
-	generateSignedAttestation(it, privKeyPath, pubKeyPath, attestationPath)
+	generateSignedAttestation(it, privKeyPath, pubKeyPath, appDirPath)
 
 }
 
@@ -135,27 +127,12 @@ func generateMaterial(appName, appPath, appSourceRepoUrl, appSourceRevision, app
 	return materials
 }
 
-func getDigestFromFile(fpath string) string {
-
-	f, err := os.Open(fpath)
-	if err != nil {
-		fmt.Println("Error in opening fpath")
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		fmt.Println("Error in sha256")
-	}
-
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
-func generateSignedAttestation(it in_toto.Statement, privKeyPath string, pubKeyPath string, attestationPath string) {
+func generateSignedAttestation(it in_toto.Statement, privKeyPath string, pubKeyPath string, appDirPath string) {
 
 	b, err := json.Marshal(it)
 	if err != nil {
-		fmt.Println("Error in marshaling it")
+		log.Info("Error in marshaling attestation:  %s", err.Error())
+		return
 	}
 
 	ecdsaPriv, _ := ioutil.ReadFile(filepath.Clean(privKeyPath))
@@ -167,45 +144,48 @@ func generateSignedAttestation(it in_toto.Statement, privKeyPath string, pubKeyP
 	x509Encoded, err := encrypted.Decrypt(pb.Bytes, []byte(pwd))
 
 	if err != nil {
-		fmt.Println("Error in dycrypting private key")
+		log.Info("Error in dycrypting private key")
+		return
 	}
 	priv, err := x509.ParsePKCS8PrivateKey(x509Encoded)
 
 	if err != nil {
-		fmt.Println("Error in parsing private key")
+		log.Info("Error in parsing private key")
+		return
 	}
 
 	signer, err := ssl.NewEnvelopeSigner(&IntotoSigner{
 		priv: priv.(*ecdsa.PrivateKey),
 	})
 	if err != nil {
-		fmt.Println("Error in creating new signer")
+		log.Info("Error in creating new signer")
+		return
 	}
 
 	env, err := signer.SignPayload("application/vnd.in-toto+json", b)
 	if err != nil {
-		fmt.Println("Error in signing payload")
+		log.Info("Error in signing payload")
+		return
 	}
 
 	// Now verify
 	err = signer.Verify(env)
 	if err != nil {
-		fmt.Println("Error in verifying env")
+		log.Info("Error in verifying env")
+		return
 	}
 
 	eb, err := json.Marshal(env)
 	if err != nil {
-		fmt.Println("Error in marshaling env")
+		log.Info("Error in marshaling env")
+		return
 	}
-
-	f, err := os.Create(attestationPath)
-	defer f.Close()
-
-	bytes, err := f.Write(eb)
 
 	log.Debug("attestation.json", string(eb))
 
-	log.Info(fmt.Sprintf("Generated attestation.json, wrote %d bytes\n", bytes))
+	utils.WriteToFile(string(eb), appDirPath, utils.ATTESTATION_FILE_NAME)
+
+	attestationPath := filepath.Join(appDirPath, utils.ATTESTATION_FILE_NAME)
 
 	upload(it, attestationPath, pubKeyPath)
 
@@ -323,8 +303,7 @@ func run(stdin, cmd string, arg ...string) string {
 	}
 	b, err := c.CombinedOutput()
 	if err != nil {
-		fmt.Println(string(b))
-
+		log.Info("Error in executing CLI: %s", string(b))
 	}
 	return string(b)
 }

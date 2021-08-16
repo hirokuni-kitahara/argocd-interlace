@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"fmt"
-
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -11,6 +10,6 @@ var versionCmd = &cobra.Command{
 	Short: "argocd-interlace version",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("argocd-interlace 0.0.1")
+		log.Info("argocd-interlace 0.0.1")
 	},
 }

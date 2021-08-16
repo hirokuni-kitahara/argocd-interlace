@@ -28,11 +28,6 @@ type controller struct {
 	namespace            string
 }
 
-const (
-	PRIVATE_KEY_PATH = "/etc/signing-secrets/cosign.key"
-	PUB_KEY_PATH     = "/etc/signing-secrets/cosign.pub"
-)
-
 func Start(ctx context.Context, config string, namespace string) {
 	_, cfg, err := utils.GetClient(config)
 	appClientset := appClientset.NewForConfigOrDie(cfg)
@@ -82,7 +77,7 @@ func newController(applicationClientset appClientset.Interface, namespace string
 				app, ok := obj.(*appv1.Application)
 
 				if ok {
-					manifest.CreateEventHandler(app, PRIVATE_KEY_PATH, PUB_KEY_PATH)
+					manifest.CreateEventHandler(app)
 				}
 			*/
 			if err == nil {
@@ -98,7 +93,7 @@ func newController(applicationClientset appClientset.Interface, namespace string
 			oldApp, oldOK := old.(*appv1.Application)
 			newApp, newOK := new.(*appv1.Application)
 			if oldOK && newOK {
-				manifest.UpdateEventHandler(oldApp, newApp, PRIVATE_KEY_PATH, PUB_KEY_PATH)
+				manifest.UpdateEventHandler(oldApp, newApp)
 			}
 
 			if err == nil {
