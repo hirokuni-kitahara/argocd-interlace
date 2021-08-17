@@ -16,7 +16,7 @@ spec:
       serviceAccountName: argocd-interlace-controller
       containers:
         - name: argocd-interlace-controller
-          image: gcr.io/kg-image-registry/argocd-interlace-controller:dev60
+          image: gcr.io/kg-image-registry/argocd-interlace-controller:dev90
           imagePullPolicy: Always
           command:
             - argocd-interlace
@@ -27,8 +27,16 @@ spec:
               value: ""
             - name: DOCKER_CONFIG
               value: /tmp/.docker/
+            - name: MANIFEST_STORAGE
+              value: OCI # GIT/COS   
             - name: IMAGE_REGISTRY
               value: gcr.io/kg-image-registry
+            - name: ARGOCD_INTERLACE_MANIFEST_GITREPO_URL
+              value: https://github.com/gajananan/argocd-interlace-manifests
+            - name: ARGOCD_INTERLACE_MANIFEST_GITREPO_USER
+              value: gajananan
+            - name: ARGOCD_INTERLACE_MANIFEST_GITREPO_TOKEN
+              value: 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
             - name: IMAGE_PREFIX
               value: argocd.apps.ma4kmc2
             - name: IMAGE_TAG

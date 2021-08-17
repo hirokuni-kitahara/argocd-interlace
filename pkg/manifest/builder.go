@@ -10,7 +10,7 @@ import (
 
 	"github.com/IBM/integrity-enforcer/enforcer/pkg/mapnode"
 	appv1 "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/gajananan/argocd-interlace/pkg/provenance"
+	"github.com/gajananan/argocd-interlace/pkg/storage"
 	"github.com/gajananan/argocd-interlace/pkg/utils"
 	"github.com/sigstore/k8s-manifest-sigstore/pkg/k8smanifest"
 	k8smnfutil "github.com/sigstore/k8s-manifest-sigstore/pkg/util"
@@ -195,20 +195,52 @@ func signManifestAndGenerateProvenance(appName, appPath, appSourceRepoUrl, appSo
 
 	utils.WriteToFile(string(finalManifest), appDirPath, utils.MANIFEST_FILE_NAME)
 
-	err := signManifest(appDirPath, imageRef)
+	manifestGitUrl := ""
+
+	manifestGitUrl = os.Getenv("ARGOCD_INTERLACE_MANIFEST_GITREPO_URL")
+
+	if manifestGitUrl == "" {
+		log.Info("ARGOCD_INTERLACE_MANIFEST_GITREPO_URL is empty, please specify in configuration !")
+	}
+
+	manifestGitUserId := os.Getenv("ARGOCD_INTERLACE_MANIFEST_GITREPO_USER")
+
+	manifestGitToken := os.Getenv("ARGOCD_INTERLACE_MANIFEST_GITREPO_TOKEN")
+	log.Info("calling InitializeStorageBackends")
+
+	allStorage, err := storage.InitializeStorageBackends(appName, appPath, appDirPath,
+		appSourceRepoUrl, appSourceRevision, appSourceCommitSha, imageRef,
+		manifestGitUrl, manifestGitUserId, manifestGitToken, string(finalManifest),
+		buildStartedOn)
+
+	if err != nil {
+		return
+	}
+
+	for _, storage := range allStorage {
+
+		log.Info("calling StoreManifestSignature")
+		storage.StoreManifestSignature()
+
+		loc, _ := time.LoadLocation("UTC")
+
+		buildFinishedOn := time.Now().In(loc)
+
+		storage.SetBuildFinishedOn(buildFinishedOn)
+
+		storage.StoreManifestProvenance()
+	}
+
+	/*err := signManifest(appDirPath, imageRef)
 
 	if err != nil {
 		log.Info("Error in signing bundle image err %s", err.Error())
 		return
 	}
 
-	loc, _ := time.LoadLocation("UTC")
-
-	buildFinishedOn := time.Now().In(loc)
-
 	provenance.GenerateProvanance(appName, appPath, appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
 		imageRef, buildStartedOn, buildFinishedOn)
-
+	*/
 	return
 }
 

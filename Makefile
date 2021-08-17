@@ -1,5 +1,5 @@
 NAME=gcr.io/kg-image-registry/argocd-interlace-controller
-VERSION=dev60
+VERSION=dev90
 
 .PHONY: build build-cli build-core, deploy, delete
 

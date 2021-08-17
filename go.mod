@@ -5,9 +5,10 @@ go 1.16
 require (
 	github.com/IBM/integrity-enforcer/enforcer v0.0.0-20201001024601-320551d946dc
 	github.com/argoproj/argo-cd/v2 v2.0.5
+	github.com/go-git/go-billy/v5 v5.3.1
+	github.com/go-git/go-git/v5 v5.4.2
 	github.com/go-redis/redis/v8 v8.11.1 // indirect
 	github.com/google/go-containerregistry v0.5.1
-	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/in-toto/in-toto-golang v0.2.1-0.20210627200632-886210ae2ab9
 	github.com/sigstore/cosign v1.0.1
 	github.com/sigstore/k8s-manifest-sigstore v0.0.0-20210802132923-67f63f79ca88
@@ -82,5 +83,5 @@ replace k8s.io/sample-controller => k8s.io/sample-controller v0.21.2
 replace (
 	github.com/docker/distribution => github.com/distribution/distribution v2.7.1+incompatible
 	github.com/docker/docker => github.com/moby/moby v0.7.3-0.20190826074503-38ab9da00309
-
+	github.com/sigstore/k8s-manifest-sigstore => github.com/hirokuni-kitahara/k8s-manifest-sigstore v0.0.0-20210817073847-3db651cc9c16
 )

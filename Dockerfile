@@ -25,6 +25,24 @@ COPY build/_bin/argocd-interlace /usr/local/bin/argocd-interlace
 COPY rekor/rekor-cli /usr/local/bin/rekor-cli
 
 WORKDIR /ishield-app
+COPY scripts/generate_signedcm.sh /ishield-app/generate_signedcm.sh
+COPY scripts/gpg-annotation-sign.sh /ishield-app/gpg-annotation-sign.sh
+COPY scripts/x509-annotation-sign.sh /ishield-app/x509-annotation-sign.sh
+
+RUN chmod +x /ishield-app/generate_signedcm.sh &&\
+    chmod +x /ishield-app/gpg-annotation-sign.sh &&\
+    chmod +x /ishield-app/x509-annotation-sign.sh
+
+#RUN export VERSION=v3.4.0 &&\
+#    export BINARY=yq_linux_amd64 &&\
+#    curl -L https://github.com/mikefarah/yq/releases/download/${VERSION}/${BINARY} -o /usr/bin/yq &&\
+#    chmod +x /usr/bin/yq
+
+COPY yq /usr/bin/yq
+
+RUN  chmod +x /usr/bin/yq
+
+RUN yq -V
 
 ENTRYPOINT ["argocd-interlace"]
 
