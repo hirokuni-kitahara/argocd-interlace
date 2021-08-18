@@ -8,7 +8,7 @@ import (
 
 	appv1 "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appClientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
-	"github.com/gajananan/argocd-interlace/pkg/manifest"
+	"github.com/gajananan/argocd-interlace/pkg/interlace"
 	"github.com/gajananan/argocd-interlace/pkg/utils"
 
 	log "github.com/sirupsen/logrus"
@@ -77,7 +77,7 @@ func newController(applicationClientset appClientset.Interface, namespace string
 				app, ok := obj.(*appv1.Application)
 
 				if ok {
-					manifest.CreateEventHandler(app)
+					interlace.CreateEventHandler(app)
 				}
 			*/
 			if err == nil {
@@ -93,7 +93,7 @@ func newController(applicationClientset appClientset.Interface, namespace string
 			oldApp, oldOK := old.(*appv1.Application)
 			newApp, newOK := new.(*appv1.Application)
 			if oldOK && newOK {
-				manifest.UpdateEventHandler(oldApp, newApp)
+				interlace.UpdateEventHandler(oldApp, newApp)
 			}
 
 			if err == nil {

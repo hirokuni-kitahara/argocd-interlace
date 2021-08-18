@@ -8,16 +8,17 @@ import (
 )
 
 type StorageBackend interface {
+	GetLatestManifestContent() ([]byte, error)
 	StoreManifestSignature() error
 	StoreManifestProvenance() error
-	SetBuildFinishedOn(buildFinishedOn time.Time)
+	SetBuildStartedOn(buildStartedOn time.Time) error
+	SetBuildFinishedOn(buildFinishedOn time.Time) error
 	Type() string
 }
 
 func InitializeStorageBackends(appName, appPath, appDirPath,
-	appSourceRepoUrl, appSourceRevision, appSourceCommitSha, imageRef,
-	manifestGitUrl, manifestGitUserId, manifestGitToken, finalManifest string,
-	buildStartedOn time.Time) (map[string]StorageBackend, error) {
+	appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
+	manifestGitUrl, manifestGitUserId, manifestGitUserEmail, manifestGitToken string) (map[string]StorageBackend, error) {
 
 	//configuredStorageBackends := []string{oci.StorageBackendOCI}
 	configuredStorageBackends := []string{git.StorageBackendGit}
@@ -28,8 +29,7 @@ func InitializeStorageBackends(appName, appPath, appDirPath,
 		case oci.StorageBackendOCI:
 
 			ociStorageBackend, err := oci.NewStorageBackend(appName, appPath, appDirPath,
-				appSourceRepoUrl, appSourceRevision, appSourceCommitSha, imageRef,
-				buildStartedOn)
+				appSourceRepoUrl, appSourceRevision, appSourceCommitSha)
 			if err != nil {
 				return nil, err
 			}
@@ -38,8 +38,7 @@ func InitializeStorageBackends(appName, appPath, appDirPath,
 		case git.StorageBackendGit:
 			gitStorageBackend, err := git.NewStorageBackend(appName, appPath, appDirPath,
 				appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
-				manifestGitUrl, manifestGitUserId, manifestGitToken,
-				buildStartedOn)
+				manifestGitUrl, manifestGitUserId, manifestGitToken)
 			if err != nil {
 				return nil, err
 			}

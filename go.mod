@@ -26,6 +26,7 @@ require (
 	k8s.io/kube-aggregator v0.21.3 // indirect
 	k8s.io/kubectl v0.21.3 // indirect
 	k8s.io/kubernetes v1.21.0 // indirect
+	sigs.k8s.io/yaml v1.2.0
 )
 
 replace k8s.io/api => k8s.io/api v0.21.2

@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v2"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -73,7 +76,7 @@ func WriteToFile(str, dirPath, filename string) {
 
 }
 
-func QueryAPI(url string, data map[string]string) string {
+func QueryAPI(url, requestType string, data map[string]interface{}) string {
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	token := os.Getenv("ARGOCD_TOKEN")
@@ -84,7 +87,7 @@ func QueryAPI(url string, data map[string]string) string {
 	} else {
 		dataJson = nil
 	}
-	req, err := http.NewRequest("GET", url, bytes.NewBuffer(dataJson))
+	req, err := http.NewRequest(requestType, url, bytes.NewBuffer(dataJson))
 	if err != nil {
 		log.Info("Error %s ", err)
 	}
@@ -102,4 +105,45 @@ func QueryAPI(url string, data map[string]string) string {
 	}
 
 	return string([]byte(body))
+}
+
+func RetriveDesiredManifest(appName string) string {
+
+	baseUrl := os.Getenv("ARGOCD_API_BASE_URL")
+
+	if baseUrl == "" {
+		log.Info("ARGOCD_API_BASE_URL is empty, please specify it in configuration!")
+		return ""
+	}
+
+	desiredRscUrl := fmt.Sprintf("%s/%s/managed-resources", baseUrl, appName)
+
+	desiredManifest := QueryAPI(desiredRscUrl, "GET", nil)
+
+	return desiredManifest
+}
+
+func PrepareFinalManifest(targetState, finalManifest string, counter int, numberOfitems int) string {
+
+	var obj *unstructured.Unstructured
+
+	err := json.Unmarshal([]byte(targetState), &obj)
+	if err != nil {
+		log.Info("Error in unmarshaling err %s", err.Error())
+	}
+
+	objBytes, _ := yaml.Marshal(obj)
+	endLine := ""
+	if !strings.HasSuffix(string(objBytes), "\n") {
+		endLine = "\n"
+	}
+
+	finalManifest = fmt.Sprintf("%s%s%s", finalManifest, string(objBytes), endLine)
+	finalManifest = strings.ReplaceAll(finalManifest, "object:\n", "")
+
+	if counter < numberOfitems {
+		finalManifest = fmt.Sprintf("%s---\n", finalManifest)
+	}
+
+	return finalManifest
 }

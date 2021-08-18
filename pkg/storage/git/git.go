@@ -1,39 +1,43 @@
 package git
 
 import (
-	"fmt"
+	"encoding/base64"
 	"io/ioutil"
 	"path/filepath"
 	"time"
 
+	"github.com/gajananan/argocd-interlace/pkg/sign"
 	"github.com/gajananan/argocd-interlace/pkg/utils"
 	billy "github.com/go-git/go-billy/v5"
 	memfs "github.com/go-git/go-billy/v5/memfs"
-	"github.com/sigstore/k8s-manifest-sigstore/pkg/k8smanifest"
-	"github.com/tidwall/gjson"
-
-	"github.com/go-git/go-git/v5/plumbing/object"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	memory "github.com/go-git/go-git/v5/storage/memory"
 	k8smnfutil "github.com/sigstore/k8s-manifest-sigstore/pkg/util"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
+	"sigs.k8s.io/yaml"
 )
 
 type StorageBackend struct {
-	appName            string
-	appPath            string
-	appDirPath         string
-	appSourceRepoUrl   string
-	appSourceRevision  string
-	appSourceCommitSha string
-	manifestGitUrl     string
-	manifestGitUserId  string
-	manifestGitToken   string
-	buildStartedOn     time.Time
-	buildFinishedOn    time.Time
-	manifest           []byte
+	appName              string
+	appPath              string
+	appDirPath           string
+	appSourceRepoUrl     string
+	appSourceRevision    string
+	appSourceCommitSha   string
+	manifestGitUrl       string
+	manifestGitUserId    string
+	manifestGitUserEmail string
+	manifestGitToken     string
+	buildStartedOn       time.Time
+	buildFinishedOn      time.Time
+	manifest             []byte
+	repo                 *git.Repository
+	storer               *memory.Storage
+	fs                   billy.Filesystem
 }
 
 const (
@@ -41,8 +45,9 @@ const (
 )
 
 func NewStorageBackend(appName, appPath, appDirPath,
-	appSourceRepoUrl, appSourceRevision, appSourceCommitSha, manifestGitUrl, manifestGitUserId, manifestGitToken string,
-	buildStartedOn time.Time) (*StorageBackend, error) {
+	appSourceRepoUrl, appSourceRevision, appSourceCommitSha,
+	manifestGitUrl, manifestGitUserId, manifestGitToken string,
+) (*StorageBackend, error) {
 	return &StorageBackend{
 		appName:            appName,
 		appPath:            appPath,
@@ -53,25 +58,79 @@ func NewStorageBackend(appName, appPath, appDirPath,
 		manifestGitUrl:     manifestGitUrl,
 		manifestGitUserId:  manifestGitUserId,
 		manifestGitToken:   manifestGitToken,
-		buildStartedOn:     buildStartedOn,
 	}, nil
+}
+
+func (s StorageBackend) GetLatestManifestContent() ([]byte, error) {
+
+	s.gitClone()
+
+	absFilePath := filepath.Join(s.appName, s.appPath, utils.CONFIG_FILE_NAME)
+
+	log.Info("absFilePath ", absFilePath)
+	file, err := s.fs.Open(absFilePath)
+
+	if err != nil {
+		log.Fatalf("Error occured while opening file %s :%v", absFilePath, err)
+		return nil, err
+	}
+
+	var fileContent []byte
+
+	_, err = file.Read(fileContent)
+	if err != nil {
+		log.Fatalf("Error occured while reading file %s :%v", absFilePath, err)
+		return nil, err
+	}
+
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("Error occured while reading file %s :%v", absFilePath, err)
+		return nil, err
+	}
+
+	jsonBytes, err := yaml.YAMLToJSON(content)
+
+	gzipMessage, err := base64.StdEncoding.DecodeString(gjson.Get(string(jsonBytes), "data.message").String())
+
+	gzipTarBall := k8smnfutil.GzipDecompress(gzipMessage)
+
+	yamls, err := k8smnfutil.GetYAMLsInArtifact(gzipTarBall)
+
+	contactYamls := k8smnfutil.ConcatenateYAMLs(yamls)
+
+	return contactYamls, nil
 }
 
 func (s StorageBackend) StoreManifestSignature() error {
 
-	signManifest(s.appDirPath)
+	manifestPath := filepath.Join(s.appDirPath, utils.MANIFEST_FILE_NAME)
+
+	signedManifestPath := filepath.Join(s.appDirPath, utils.SIGNED_MANIFEST_FILE_NAME)
+
+	keyPath := utils.PRIVATE_KEY_PATH
+
+	err := sign.SignManifest("", keyPath, manifestPath, signedManifestPath)
+
+	if err != nil {
+		log.Info("Error in signing manifest err %s", err.Error())
+		return err
+	}
 
 	configFilePath := filepath.Join(s.appDirPath, utils.CONFIG_FILE_NAME)
 
 	signedManifestFilePath := filepath.Join(s.appDirPath, utils.SIGNED_MANIFEST_FILE_NAME)
 
-	name := s.appName + "-cosign-keyed-sig"
+	name := s.appName + "-manifest-sig"
+
 	out, err := k8smnfutil.CmdExec("/ishield-app/generate_signedcm.sh", signedManifestFilePath, name, configFilePath)
 
 	if err != nil {
 		log.Info("error is generating signed configmap ", err.Error())
 	}
-	log.Info(out)
+
+	log.Debug(out)
+
 	s.gitCloneAndUpdate()
 
 	return nil
@@ -80,21 +139,27 @@ func (s StorageBackend) StoreManifestSignature() error {
 func (s StorageBackend) StoreManifestProvenance() error {
 	return nil
 }
-func (s StorageBackend) SetBuildFinishedOn(buildFinishedOn time.Time) {
-	s.buildFinishedOn = buildFinishedOn
+
+func (s StorageBackend) SetBuildStartedOn(buildStartedOn time.Time) error {
+	s.buildStartedOn = buildStartedOn
+	return nil
 }
+
+func (s StorageBackend) SetBuildFinishedOn(buildFinishedOn time.Time) error {
+	s.buildFinishedOn = buildFinishedOn
+	return nil
+}
+
 func (b *StorageBackend) Type() string {
 	return StorageBackendGit
 }
 
-var storer *memory.Storage
-var fs billy.Filesystem
+func (s StorageBackend) gitClone() {
 
-func (s StorageBackend) gitCloneAndUpdate() {
 	log.Info("Cloning repo ", s.manifestGitUrl)
-	f := memfs.New()
+	s.fs = memfs.New()
 
-	repo, err := git.Clone(memory.NewStorage(), f, &git.CloneOptions{
+	repo, err := git.Clone(memory.NewStorage(), s.fs, &git.CloneOptions{
 		URL: s.manifestGitUrl,
 		Auth: &http.BasicAuth{
 			Username: s.manifestGitUserId,
@@ -105,22 +170,27 @@ func (s StorageBackend) gitCloneAndUpdate() {
 	if err != nil {
 		log.Info("Error in clone repo %s", err.Error())
 	}
-	w, err := repo.Worktree()
 
-	//fileDirPath := filepath.Join(".", s.appPath)
+	s.repo = repo
+}
+
+func (s StorageBackend) gitCloneAndUpdate() {
+
+	s.gitClone()
+
+	w, err := s.repo.Worktree()
 
 	absFilePath := filepath.Join(s.appName, s.appPath, utils.CONFIG_FILE_NAME)
 
 	log.Info("absFilePath ", absFilePath)
 
-	f.Remove(absFilePath)
+	s.fs.Remove(absFilePath)
 
-	//file, err := fs.OpenFile(absFilePath, os.O_RDWR|os.O_CREATE, 0666)
-
-	file, err := f.Create(absFilePath)
+	file, err := s.fs.Create(absFilePath)
 
 	if err != nil {
 		log.Fatalf("Error occured while opening file %s :%v", absFilePath, err)
+		return
 	}
 
 	configFilePath := filepath.Join(s.appDirPath, utils.CONFIG_FILE_NAME)
@@ -132,6 +202,7 @@ func (s StorageBackend) gitCloneAndUpdate() {
 
 	if err != nil {
 		log.Fatalf("Error occured while writing to file %s :%v", absFilePath, err)
+		return
 	}
 
 	status, _ := w.Status()
@@ -145,22 +216,10 @@ func (s StorageBackend) gitCloneAndUpdate() {
 	log.Info("Git status after adding new file ", status)
 
 	// git commit -m $message
-	_, err = w.Commit("Added my new file", getCommitOptions())
+	_, err = w.Commit("Added my new file", s.getCommitOptions())
 	if err != nil {
 		log.Fatalf("Error occured while committing file %s :%v", absFilePath, err)
-	}
-
-	iter, _ := repo.CommitObjects()
-
-	for {
-		item, err := iter.Next()
-		fmt.Println("------------")
-		fmt.Println(item, err)
-		fmt.Println("------------")
-		if err != nil {
-			break
-		}
-
+		return
 	}
 
 	status, _ = w.Status()
@@ -170,18 +229,10 @@ func (s StorageBackend) gitCloneAndUpdate() {
 		log.Info("Git status after commiting new file ", status.IsClean())
 	}
 
-	dir := filepath.Join(s.appName, s.appPath)
-
-	fileInfo, _ := w.Filesystem.ReadDir(dir)
-
-	for _, v := range fileInfo {
-		fmt.Println("fileName ", v.Name(), v.IsDir())
-
-	}
-
 	log.Info("Pushing changes to manifest file ")
+
 	//Push the code to the remote
-	err = repo.Push(&git.PushOptions{
+	err = s.repo.Push(&git.PushOptions{
 		RemoteName: "origin",
 		Auth: &http.BasicAuth{
 			Username: s.manifestGitUserId,
@@ -193,60 +244,13 @@ func (s StorageBackend) gitCloneAndUpdate() {
 	}
 }
 
-func getCommitOptions() *git.CommitOptions {
+func (s StorageBackend) getCommitOptions() *git.CommitOptions {
+
 	return &git.CommitOptions{
 		Author: &object.Signature{
-			Name:  "gajananan",
-			Email: "gajan@jp.ibm.com",
+			Name:  s.manifestGitUserId,
+			Email: s.manifestGitUserEmail,
 			When:  time.Now(),
 		},
 	}
-}
-
-func signManifest(appDirPath string) error {
-
-	manifestFilePath := filepath.Join(appDirPath, utils.MANIFEST_FILE_NAME)
-	signedManifestFilePath := filepath.Join(appDirPath, utils.SIGNED_MANIFEST_FILE_NAME)
-
-	keyPath := utils.PRIVATE_KEY_PATH
-
-	so := &k8smanifest.SignOption{
-		ImageRef:         "",
-		KeyPath:          keyPath,
-		Output:           signedManifestFilePath,
-		UpdateAnnotation: true,
-		ImageAnnotations: nil,
-	}
-
-	_, err := k8smanifest.Sign(manifestFilePath, so)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func getSignatureMessage(appDirPath string) (string, string) {
-	signedManifestFilePath := filepath.Join(appDirPath, utils.SIGNED_MANIFEST_FILE_NAME)
-
-	signedManifestYamlBytes, _ := ioutil.ReadFile(filepath.Clean(signedManifestFilePath))
-
-	signedManifestYAMLs := k8smnfutil.SplitConcatYAMLs(signedManifestYamlBytes)
-
-	signature := ""
-	message := ""
-	for _, item := range signedManifestYAMLs {
-		log.Info("signedYaml ", string(item))
-
-		sig := gjson.Get(string(item), "metadata.annotations.\"cosign.sigstore.dev/signature\"")
-
-		signature = sig.String()
-		msg := gjson.Get(string(item), "metadata.annotations.\"cosign.sigstore.dev/message\"")
-		message = msg.String()
-
-		if signature != "" && message != "" {
-			break
-		}
-	}
-
-	return signature, message
 }
