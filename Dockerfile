@@ -22,6 +22,8 @@ RUN chgrp -R 0 /ishield-app && chmod -R g=u /ishield-app
 
 COPY build/_bin/argocd-interlace /usr/local/bin/argocd-interlace
 
+# looks better to use rekor codes instead of executing rekor-cli inside container?
+# at least should avoid to use ./rekor directory which is not committed in git
 COPY rekor/rekor-cli /usr/local/bin/rekor-cli
 
 WORKDIR /ishield-app
@@ -42,3 +44,4 @@ RUN yq -V
 ENTRYPOINT ["argocd-interlace"]
 
 
+# should remove all `ishield` from codes

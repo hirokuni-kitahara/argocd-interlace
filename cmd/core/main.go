@@ -1,8 +1,12 @@
+// license text should be inserted here in all codes
+
 package main
 
 import (
 	"os"
 
+	// better to avoid import from forked repo.
+	// use upstream repo url here instead, and replace it in go.mod
 	"github.com/gajananan/argocd-interlace/cmd"
 	log "github.com/sirupsen/logrus"
 )

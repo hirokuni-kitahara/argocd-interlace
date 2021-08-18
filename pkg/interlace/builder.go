@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// should have some description comments at least for this kind of major functions in a project
 func UpdateEventHandler(oldApp, newApp *appv1.Application) {
 
 	generateManifest := false
@@ -58,6 +59,8 @@ func UpdateEventHandler(oldApp, newApp *appv1.Application) {
 
 }
 
+// better to handle errors properly instead of just log output in info level
+// especially for errors returned by storage.XXXXX() functinos
 func signManifestAndGenerateProvenance(appName, appPath, appServer,
 	appSourceRepoUrl, appSourceRevision, appSourceCommitSha string, created bool) {
 
@@ -97,6 +100,7 @@ func signManifestAndGenerateProvenance(appName, appPath, appServer,
 		return
 	}
 
+	// recommend to avoid the same variable name as the package name (about `storage`)
 	for _, storage := range allStorage {
 
 		manifestGenerated := false

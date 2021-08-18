@@ -283,6 +283,7 @@ func getUUIDFromUploadOutput(out string) string {
 
 func runCli(arg ...string) string {
 
+	// rekor server url should be configurable
 	arg = append(arg, "--rekor_server=https://rekor.sigstore.dev")
 	// use a blank config file to ensure no collision
 	if os.Getenv("REKORTMPDIR") != "" {

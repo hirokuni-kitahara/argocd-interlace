@@ -123,6 +123,7 @@ func (s StorageBackend) StoreManifestSignature() error {
 
 	name := s.appName + "-manifest-sig"
 
+	// should remove all `ishield` from codes
 	out, err := k8smnfutil.CmdExec("/ishield-app/generate_signedcm.sh", signedManifestFilePath, name, configFilePath)
 
 	if err != nil {

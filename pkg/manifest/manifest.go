@@ -73,6 +73,7 @@ func GenerateManifest(appName, appDirPath string, yamlBytes []byte) (bool, error
 	return false, nil
 }
 
+// "do something" should be something like `TODO: improve error handling`
 func checkDiff(targetObjYAMLBytes []byte, manifestYAMLs [][]byte) bool {
 
 	objNode, err := mapnode.NewFromBytes(targetObjYAMLBytes) // json
@@ -96,7 +97,7 @@ func checkDiff(targetObjYAMLBytes []byte, manifestYAMLs [][]byte) bool {
 
 		// when diffs == nil,  there is no difference in YAMLs being compared.
 		if diffs == nil || diffs.Size() == 0 {
-			found = true
+			found = true // ??? set diffFound = true when no diffs are found...?
 			break
 		}
 	}
