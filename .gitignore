@@ -1,5 +1,2 @@
-build
-cluster-config
-scripts
-rekor
-deploy/deployment.yaml
+build/
+rekor/
