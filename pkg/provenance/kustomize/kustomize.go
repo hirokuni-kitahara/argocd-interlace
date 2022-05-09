@@ -32,6 +32,7 @@ import (
 	"github.com/argoproj-labs/argocd-interlace/pkg/provenance/attestation"
 	"github.com/argoproj-labs/argocd-interlace/pkg/utils"
 	"github.com/in-toto/in-toto-golang/in_toto"
+	"github.com/pkg/errors"
 	kustbuildutil "github.com/sigstore/k8s-manifest-sigstore/pkg/util/manifestbuild/kustomize"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
@@ -72,7 +73,7 @@ func (p *Provenance) GenerateProvanance(target, targetDigest string, uploadTLog 
 	url := host + orgRepo + gitSuff
 	log.Info("url:", url)
 
-	r, err := GetTopGitRepo(url)
+	r, err := GetTopGitRepo(url, appSourceRevision)
 
 	if err != nil {
 		log.Errorf("Error git clone:  %s", err.Error())
@@ -150,49 +151,77 @@ func (p *Provenance) GenerateProvanance(target, targetDigest string, uploadTLog 
 	return nil
 }
 
-func (p *Provenance) VerifySourceMaterial() (bool, error) {
+func (p *Provenance) VerifySourceMaterial() (VerifyResult, error) {
 	appPath := p.appData.AppPath
 	appSourceRepoUrl := p.appData.AppSourceRepoUrl
+	appSourceRevision := p.appData.AppSourceRevision
 
 	interlaceConfig, err := config.GetInterlaceConfig()
-
-	host, orgRepo, path, gitRef, gitSuff := ParseGitUrl(appSourceRepoUrl)
-
-	log.Info("appSourceRepoUrl ", appSourceRepoUrl)
-
-	log.Info("host:", host, " orgRepo:", orgRepo, " path:", path, " gitRef:", gitRef, " gitSuff:", gitSuff)
-
-	url := host + orgRepo + gitSuff
-
-	log.Info("url:", url)
-
-	r, err := GetTopGitRepo(url)
 	if err != nil {
-		log.Errorf("Error git clone:  %s", err.Error())
-		return false, err
+		log.Errorf("Error in getting interlace config:  %s", err.Error())
+		return VerifyResult{}, err
 	}
 
-	baseDir := filepath.Join(r.RootDir, appPath)
+	if appPath == "" {
+		host, orgRepo, path, gitRef, gitSuff := ParseGitUrl(appSourceRepoUrl)
 
-	keyPath := utils.KEYRING_PUB_KEY_PATH
+		log.Info("appSourceRepoUrl ", appSourceRepoUrl)
+
+		log.Info("host:", host, " orgRepo:", orgRepo, " path:", path, " gitRef:", gitRef, " gitSuff:", gitSuff)
+
+		url := host + orgRepo + gitSuff
+
+		log.Info("url:", url)
+
+		r, err := GetTopGitRepo(url, appSourceRevision)
+		if err != nil {
+			log.Errorf("Error git clone:  %s", err.Error())
+			return VerifyResult{}, err
+		}
+		appPath = r.RootDir
+	}
+
+	baseDir := appPath
+
+	keyPath := utils.GetPubkeyPath()
 
 	srcMatPath := filepath.Join(baseDir, interlaceConfig.SourceMaterialHashList)
 	srcMatSigPath := filepath.Join(baseDir, interlaceConfig.SourceMaterialSignature)
+	fmt.Println("[DEBUG] srcMatPath: ", srcMatPath)
 
-	verification_target, err := os.Open(srcMatPath)
-	signature, err := os.Open(srcMatSigPath)
-	flag, _, _, _, _ := verifySignature(keyPath, verification_target, signature)
-
-	hashCompareSuccess := false
-	if flag {
-		hashCompareSuccess, err = compareHash(srcMatPath, baseDir)
-		if err != nil {
-			return hashCompareSuccess, err
-		}
-		return hashCompareSuccess, nil
+	if _, err := os.Stat(srcMatPath); errors.Is(err, os.ErrNotExist) {
+		return VerifyResult{Result: utils.VerifyResultInvalid, Message: fmt.Sprintf("%s does not exist in the repository", interlaceConfig.SourceMaterialHashList)}, nil
 	}
 
-	return flag, nil
+	if _, err := os.Stat(srcMatSigPath); errors.Is(err, os.ErrNotExist) {
+		return VerifyResult{Result: utils.VerifyResultInvalid, Message: fmt.Sprintf("%s does not exist in the repository", interlaceConfig.SourceMaterialSignature)}, nil
+	}
+
+	verification_target, err := os.Open(srcMatPath)
+	if err != nil {
+		return VerifyResult{}, errors.Wrap(err, fmt.Sprintf("error when opening the material hash file `%s`", srcMatPath))
+	}
+	signature, err := os.Open(srcMatSigPath)
+	if err != nil {
+		return VerifyResult{}, errors.Wrap(err, fmt.Sprintf("error when opening the signature file `%s`", srcMatSigPath))
+	}
+	sigOK, failReason, _, _, err := verifySignature(keyPath, verification_target, signature)
+	if err != nil {
+		return VerifyResult{}, errors.Wrap(err, "error in verifying signature")
+	}
+	if !sigOK {
+		return VerifyResult{Result: utils.VerifyResultInvalid, Message: fmt.Sprintf("signature verification failed; %s", failReason)}, nil
+	}
+
+	hashOK, err := compareHash(srcMatPath, baseDir)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if !hashOK {
+		return VerifyResult{Result: utils.VerifyResultInvalid, Message: "hash does not match with the signed hash file"}, nil
+	}
+
+	return VerifyResult{Result: utils.VerifyResultValid, Message: "signature verification passed"}, nil
 }
 
 func (p *Provenance) GetReference() *provenance.ProvenanceRef {
@@ -252,16 +281,13 @@ func NewSignerFromUserId(uid *packet.UserId) *Signer {
 
 func LoadKeyRing(keyPath string) (openpgp.EntityList, error) {
 	entities := []*openpgp.Entity{}
-	var retErr error
 	kpath := filepath.Clean(keyPath)
 	if keyRingReader, err := os.Open(kpath); err != nil {
-		log.Warn("Failed to open keyring")
-		retErr = err
+		return nil, errors.Wrap(err, "Failed to open keyring")
 	} else {
 		tmpList, err := openpgp.ReadKeyRing(keyRingReader)
 		if err != nil {
-			log.Warn("Failed to read keyring")
-			retErr = err
+			return nil, errors.Wrap(err, "Failed to read keyring")
 		}
 		for _, tmp := range tmpList {
 			for _, id := range tmp.Identities {
@@ -270,7 +296,7 @@ func LoadKeyRing(keyPath string) (openpgp.EntityList, error) {
 			entities = append(entities, tmp)
 		}
 	}
-	return openpgp.EntityList(entities), retErr
+	return openpgp.EntityList(entities), nil
 }
 
 func compareHash(sourceMaterialPath string, baseDir string) (bool, error) {
@@ -345,4 +371,21 @@ func generateMaterial(appName, appPath, appSourceRepoUrl, appSourceRevision, app
 	}
 
 	return materials
+}
+
+type VerifyResult struct {
+	Result  string `json:"result"`
+	Message string `json:"message"`
+}
+
+func VerifySourceMaterial(repoPath, repoURL, revision string) (VerifyResult, error) {
+	appdata, err := application.NewApplicationData("", repoPath, "", "", repoURL, revision, "", "", "", false, []string{}, "", "", "")
+	if err != nil {
+		return VerifyResult{}, errors.Wrap(err, "failed to initialize Application Data")
+	}
+	prov, err := NewProvenance(*appdata)
+	if err != nil {
+		return VerifyResult{}, errors.Wrap(err, "failed to initialize Provenance")
+	}
+	return prov.VerifySourceMaterial()
 }

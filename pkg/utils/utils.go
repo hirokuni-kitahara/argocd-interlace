@@ -38,19 +38,32 @@ import (
 )
 
 const (
-	MANIFEST_FILE_NAME        = "manifest.yaml"
-	MANIFEST_DIR              = "manifest-bundles"
-	SIGNED_MANIFEST_FILE_NAME = "manifest.signed"
-	PROVENANCE_FILE_NAME      = "provenance.yaml"
-	ATTESTATION_FILE_NAME     = "attestation.json"
-	TMP_DIR                   = "/tmp/output"
-	PRIVATE_KEY_PATH          = "/etc/signing-secrets/cosign.key"
-	PUB_KEY_PATH              = "/etc/signing-secrets/cosign.pub"
-	KEYRING_PUB_KEY_PATH      = "/.gnupg/pubring.gpg"
-	SIG_ANNOTATION_NAME       = "cosign.sigstore.dev/signature"
-	MSG_ANNOTATION_NAME       = "cosign.sigstore.dev/message"
-	RETRY_ATTEMPTS            = 10
+	MANIFEST_FILE_NAME           = "manifest.yaml"
+	MANIFEST_DIR                 = "manifest-bundles"
+	SIGNED_MANIFEST_FILE_NAME    = "manifest.signed"
+	PROVENANCE_FILE_NAME         = "provenance.yaml"
+	ATTESTATION_FILE_NAME        = "attestation.json"
+	TMP_DIR                      = "/tmp/output"
+	PRIVATE_KEY_PATH             = "/etc/signing-secrets/cosign.key"
+	PUB_KEY_PATH                 = "/etc/signing-secrets/cosign.pub"
+	KEYRING_PUB_KEY_PATH_ENV_VAR = "KEYRING_PUB_KEY_PATH"
+	DEFAULT_KEYRING_PUB_KEY_PATH = "/.gnupg/pubring.gpg"
+	SIG_ANNOTATION_NAME          = "cosign.sigstore.dev/signature"
+	MSG_ANNOTATION_NAME          = "cosign.sigstore.dev/message"
+	RETRY_ATTEMPTS               = 10
 )
+
+// Signature verification results
+const (
+	VerifyResultUnknown = ""
+	VerifyResultValid   = "Valid"
+	VerifyResultInvalid = "Invalid"
+)
+
+func SourceRepoVerificationEnabled() bool {
+	// TODO: add switch
+	return true
+}
 
 //GetClient returns a kubernetes client
 func GetClient(configpath string) (*kubernetes.Clientset, *rest.Config, error) {
@@ -74,6 +87,14 @@ func GetClient(configpath string) (*kubernetes.Clientset, *rest.Config, error) {
 	}
 	clientset, _ := kubernetes.NewForConfig(config)
 	return clientset, config, nil
+}
+
+func GetPubkeyPath() string {
+	keypath := os.Getenv(KEYRING_PUB_KEY_PATH_ENV_VAR)
+	if keypath != "" {
+		return keypath
+	}
+	return DEFAULT_KEYRING_PUB_KEY_PATH
 }
 
 func WriteToFile(str, dirPath, filename string) error {

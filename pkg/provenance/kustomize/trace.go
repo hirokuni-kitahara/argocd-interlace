@@ -208,7 +208,7 @@ func NewTmpConfirmedDir() (ConfirmedDir, error) {
 	return ConfirmedDir(deLinked), err
 }
 
-func GetTopGitRepo(url string) (*GitRepoResult, error) {
+func GetTopGitRepo(url, revision string) (*GitRepoResult, error) {
 
 	log.Infof("GetTopGitRepo url : %s ", url)
 
@@ -233,9 +233,10 @@ func GetTopGitRepo(url string) (*GitRepoResult, error) {
 		log.Errorf("Error in executing git remote add: %s", err.Error())
 		return nil, err
 	}
-	rev := "HEAD"
-
-	_, err = utils.CmdExec(gitCmd, r.RootDir, "fetch", "--depth=1", "origin", rev)
+	if revision == "" {
+		revision = "HEAD"
+	}
+	_, err = utils.CmdExec(gitCmd, r.RootDir, "fetch", "--depth=1", "origin", revision)
 	if err != nil {
 		log.Errorf("Error in executing git fetch: %s", err.Error())
 		return nil, err
